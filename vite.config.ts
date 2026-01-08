@@ -32,9 +32,6 @@ export default defineConfig({
             if (id.includes('@myned-ai/gsplat-flame-avatar-renderer')) {
               return 'avatar-flame';
             }
-            if (id.includes('gaussian-splat-renderer-for-lam')) {
-              return 'avatar-lam';
-            }
             // Utility library
             if (id.includes('jszip')) {
               return 'jszip';
@@ -74,6 +71,6 @@ export default defineConfig({
   // Optimize dependencies
   optimizeDeps: {
     include: ['jszip'],
-    exclude: ['@myned-ai/gsplat-flame-avatar-renderer', 'gaussian-splat-renderer-for-lam']
+    exclude: ['@myned-ai/gsplat-flame-avatar-renderer']
   }
 })
