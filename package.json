@@ -1,6 +1,6 @@
 {
     "name": "@myned-ai/avatar-chat-widget",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "type": "module",
     "description": "Real-time voice/text chat widget with 3D avatar animation",
     "author": "Myned AI",
@@ -19,14 +19,15 @@
         "text-chat",
         "3d-avatar"
     ],
-    "main": "dist/avatar-chat-widget.umd.cjs",
+    "main": "dist/avatar-chat-widget.umd.js",
     "module": "dist/avatar-chat-widget.js",
     "types": "dist/avatar-chat-widget.d.ts",
-    "jsdelivr": "dist/avatar-chat-widget.umd.cjs",
+    "jsdelivr": "dist/avatar-chat-widget.umd.js",
+    "unpkg": "dist/avatar-chat-widget.umd.js",
     "exports": {
         ".": {
             "import": "./dist/avatar-chat-widget.js",
-            "require": "./dist/avatar-chat-widget.umd.cjs",
+            "require": "./dist/avatar-chat-widget.umd.js",
             "types": "./dist/avatar-chat-widget.d.ts"
         },
         "./style.css": "./dist/avatar-chat-widget.css"

@@ -7,7 +7,7 @@
  * @example Script Tag (Wix, WordPress, HTML)
  * ```html
  * <div id="avatar-chat"></div>
- * <script src="https://cdn.jsdelivr.net/gh/user/repo@v1.0.0/dist/avatar-chat-widget.umd.cjs"></script>
+ * <script src="https://cdn.jsdelivr.net/npm/@myned-ai/avatar-chat-widget"></script>
  * <script>
  *   AvatarChat.init({
  *     container: '#avatar-chat',

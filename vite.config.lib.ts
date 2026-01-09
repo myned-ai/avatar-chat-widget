@@ -1,12 +1,12 @@
 /**
  * Vite Library Build Configuration
- * 
+ *
  * Generates:
- * - dist/avatar-chat-widget.umd.cjs  (for <script> tags)
- * - dist/avatar-chat-widget.js       (ES module for npm)
- * - dist/avatar-chat-widget.d.ts     (TypeScript definitions)
- * - dist/style.css                    (widget styles, if any external)
- * 
+ * - dist/avatar-chat-widget.umd.js  (for <script> tags and Node.js require)
+ * - dist/avatar-chat-widget.js      (ES module for npm)
+ * - dist/avatar-chat-widget.d.ts    (TypeScript definitions)
+ * - dist/style.css                  (widget styles, if any external)
+ *
  * Usage:
  *   npm run build:lib
  */
@@ -38,7 +38,7 @@ export default defineConfig({
       
       // Output file names (without extension)
       fileName: (format) => {
-        if (format === 'umd') return 'avatar-chat-widget.umd.cjs';
+        if (format === 'umd') return 'avatar-chat-widget.umd.js';
         if (format === 'es') return 'avatar-chat-widget.js';
         return `avatar-chat-widget.${format}.js`;
       },
