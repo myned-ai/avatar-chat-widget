@@ -1,6 +1,6 @@
 {
     "name": "@myned-ai/avatar-chat-widget",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "type": "module",
     "description": "Real-time voice/text chat widget with 3D avatar animation",
     "author": "Myned AI",
@@ -64,7 +64,7 @@
         "vite-plugin-dts": "^4.5.4"
     },
     "dependencies": {
-        "@myned-ai/gsplat-flame-avatar-renderer": "^1.0.2",
+        "@myned-ai/gsplat-flame-avatar-renderer": "^1.0.7",
         "jszip": "^3.10.1"
     },
     "engines": {
