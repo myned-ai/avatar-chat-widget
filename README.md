@@ -20,12 +20,13 @@ Add directly to any HTML page or website builder:
 <script src="https://cdn.jsdelivr.net/npm/@myned-ai/avatar-chat-widget"></script>
 
 <script>
-  // Initialize the widget
+  // Initialize the widget (includes default avatar automatically)
   AvatarChat.init({
     container: '#avatar-chat',
     serverUrl: 'wss://your-backend-server.com/ws',
     position: 'bottom-right',
     theme: 'light'
+    // avatarUrl is optional - uses included default avatar if not specified
   });
 </script>
 ```
@@ -64,6 +65,8 @@ chat.destroy();  // Cleanup
 | `logLevel` | `string` | `'error'` | Log level: `none`, `error`, `warn`, `info`, `debug` |
 | `customStyles` | `string` | `undefined` | Custom CSS to inject |
 | `authEnabled` | `boolean` | `true` | Enable HMAC token authentication |
+| `avatarUrl` | `string` | auto-detected | URL to avatar ZIP file (uses included default if not specified) |
+| `assetsBaseUrl` | `string` | auto-detected | Base URL for loading assets (auto-detected from CDN) |
 
 ### Callbacks
 

@@ -55,6 +55,10 @@ export interface AppConfig {
     avatarBackgroundColor: string;
     useIrisOcclusion: boolean;
   };
+  assets: {
+    baseUrl: string; // Base URL for loading assets (worklet, default avatar)
+    defaultAvatarPath: string; // Path to default avatar ZIP
+  };
 }
 
 // Default configuration
@@ -106,6 +110,12 @@ const DEFAULT_CONFIG: AppConfig = {
   ui: {
     avatarBackgroundColor: '0xffffff',
     useIrisOcclusion: true,
+  },
+  assets: {
+    // Default to local paths (works in dev mode)
+    // CDN usage will auto-detect and override this in widget.ts init()
+    baseUrl: '',  // Empty = use root path (works with Vite's public folder)
+    defaultAvatarPath: '/asset/nyx.zip',
   },
 };
 
