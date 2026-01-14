@@ -361,6 +361,11 @@ class AvatarChatElement extends HTMLElement {
       const bubble = this.shadow.querySelector('.chat-bubble');
       if (bubble) bubble.remove();
       widgetRoot.style.display = 'flex';
+
+      // Reconnect to server and resume avatar
+      if (this.chatManager) {
+        await this.chatManager.reconnectOnExpand();
+      }
     } else {
       // First time expanding, render everything
       await this.renderWidget();
@@ -632,6 +637,7 @@ export const AvatarChat = {
       collapse: () => widget.collapse(),
       isMounted: () => widget.isMounted(),
       isConnected: () => widget.isServerConnected(),
+      reconnect: () => widget.reconnect(),
     };
   },
 
@@ -665,6 +671,7 @@ export const AvatarChat = {
       collapse: () => widget.collapse(),
       isMounted: () => widget.isMounted(),
       isConnected: () => widget.isServerConnected(),
+      reconnect: () => widget.reconnect(),
     };
   },
 };

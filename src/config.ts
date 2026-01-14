@@ -154,7 +154,7 @@ let runtimeConfig: AppConfig = deepClone(DEFAULT_CONFIG);
 /**
  * Deep merge utility that preserves functions and non-JSON values
  */
-function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
+function deepMerge<T>(target: T, source: Partial<T>): T {
   const result = { ...target };
   for (const key in source) {
     if (source[key] !== undefined) {
@@ -209,7 +209,7 @@ export const CONFIG: Readonly<AppConfig> = new Proxy(runtimeConfig, {
     }
     // Handle Symbol properties (for iterators, etc.)
     if (typeof prop === 'symbol') {
-      return (target as Record<symbol, unknown>)[prop];
+      return (target as unknown as Record<symbol, unknown>)[prop];
     }
     throw new Error(`Invalid config property: ${String(prop)}`);
   },

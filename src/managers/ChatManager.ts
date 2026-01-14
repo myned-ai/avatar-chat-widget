@@ -10,13 +10,13 @@ import { errorBoundary } from '../utils/ErrorBoundary';
 import { logger } from '../utils/Logger';
 import type { Disposable } from '../types/common';
 import type { IAvatarController } from '../types/avatar';
-import type { 
-  ChatMessage, 
-  IncomingMessage, 
-  OutgoingTextMessage, 
+import type {
+  ChatMessage,
+  IncomingMessage,
+  OutgoingTextMessage,
   OutgoingAudioMessage,
   AudioStreamStartMessage,
-  AudioStreamEndMessage 
+  AudioStreamEndMessage
 } from '../types/messages';
 
 const log = logger.scope('ChatManager');
@@ -637,15 +637,16 @@ export class ChatManager implements Disposable {
   private toggleChat(): void {
     const widget = document.getElementById('chatWidget');
     const bubble = document.getElementById('chatBubble');
-    
+
     const isMinimized = widget?.classList.toggle('minimized');
-    
+
     // Show bubble when minimized, hide when expanded
     if (isMinimized) {
       bubble?.classList.remove('hidden');
       this.resetOnMinimize();
     } else {
       bubble?.classList.add('hidden');
+      this.reconnectOnExpand();
     }
   }
 
@@ -653,18 +654,26 @@ export class ChatManager implements Disposable {
    * Reset chat state when minimizing (public API for widget)
    */
   resetOnMinimize(): void {
+    log.info('Minimizing widget - stopping all activity');
+
     // Stop recording if active
     if (this.isRecording) {
+      log.debug('Stopping recording...');
       this.stopRecording();
     }
 
-    // Stop all audio playback
+    // Stop all audio playback FIRST (before disconnect)
+    log.debug('Stopping audio playback and clearing buffers...');
     this.syncPlayback.stop();
     this.audioOutput.stop();
 
     // Clear blendshape buffer and disable live mode
     this.blendshapeBuffer.clear();
     this.avatar.disableLiveBlendshapes();
+
+    // Disconnect from server to immediately stop all streaming
+    log.debug('Disconnecting from server...');
+    this.socketService.disconnect();
 
     // Reset avatar to idle and pause animation
     this.avatar.setChatState('Idle');
@@ -674,7 +683,25 @@ export class ChatManager implements Disposable {
       (this.avatar as IAvatarController & { pause(): void }).pause();
     }
 
-    log.debug('Chat minimized - reset audio, animation, and avatar state');
+    log.info('Widget minimized - all activity stopped');
+  }
+
+  /**
+   * Reconnect to server when expanding (public API for widget)
+   */
+  async reconnectOnExpand(): Promise<void> {
+    // Reconnect to server
+    try {
+      await this.socketService.connect();
+      log.debug('Chat expanded - reconnected to server');
+    } catch (error) {
+      log.error('Failed to reconnect on expand:', error);
+    }
+
+    // Resume avatar animation - type-safe check
+    if ('resume' in this.avatar && typeof this.avatar.resume === 'function') {
+      (this.avatar as IAvatarController & { resume(): void }).resume();
+    }
   }
 
   private openChat(): void {
@@ -684,10 +711,8 @@ export class ChatManager implements Disposable {
     widget?.classList.remove('minimized');
     bubble?.classList.add('hidden');
 
-    // Resume avatar animation - type-safe check
-    if ('resume' in this.avatar && typeof this.avatar.resume === 'function') {
-      (this.avatar as IAvatarController & { resume(): void }).resume();
-    }
+    // Reconnect to server and resume avatar
+    this.reconnectOnExpand();
 
     // Focus the input
     this.chatInput?.focus();
