@@ -36,3 +36,4 @@ venv/
 *.tmp
 *.temp
 *.txt
+docs/

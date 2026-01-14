@@ -16,10 +16,11 @@ const log = logger.scope('AudioContextManager');
  */
 class AudioContextManagerImpl {
   private static _instance: AudioContextManagerImpl | null = null;
-  
+
   private _context: AudioContext | null = null;
   private _isResumeListenerAdded = false;
   private _resumePromise: Promise<void> | null = null;
+  private _suspendPromise: Promise<void> | null = null;
   private _sampleRate: number = 24000;
 
   private constructor() {
@@ -47,7 +48,10 @@ class AudioContextManagerImpl {
     }
 
     try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error('AudioContext not supported in this browser');
+      }
       this._context = new AudioContextClass({
         sampleRate: this._sampleRate,
         latencyHint: 'interactive', // Optimize for real-time
@@ -108,48 +112,78 @@ class AudioContextManagerImpl {
 
   /**
    * Resume the AudioContext (call after user interaction)
+   * Race-condition safe: multiple calls will share the same promise
    */
   async resume(): Promise<void> {
     if (!this._context) {
       return;
     }
 
+    // Already running - nothing to do
     if (this._context.state === 'running') {
       return;
     }
 
-    // Prevent multiple simultaneous resume attempts
+    // Already resuming - return existing promise
     if (this._resumePromise) {
       return this._resumePromise;
     }
 
-    this._resumePromise = this._context.resume()
-      .then(() => {
+    // Start resume operation
+    this._resumePromise = (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Checked above
+        await this._context!.resume();
         log.info('AudioContext resumed successfully');
-      })
-      .catch((error) => {
+      } catch (error) {
         log.error('Failed to resume AudioContext:', error);
-        errorBoundary.handleError(error, 'audio-context-manager');
-      })
-      .finally(() => {
+        errorBoundary.handleError(error as Error, 'audio-context-manager');
+        // Re-throw to notify callers of failure
+        throw error;
+      } finally {
+        // Clear promise after completion (success or failure)
         this._resumePromise = null;
-      });
+      }
+    })();
 
     return this._resumePromise;
   }
 
   /**
    * Suspend the AudioContext (save resources when not needed)
+   * Race-condition safe: multiple calls will share the same promise
    */
   async suspend(): Promise<void> {
-    if (this._context && this._context.state === 'running') {
+    if (!this._context) {
+      return;
+    }
+
+    // Already suspended - nothing to do
+    if (this._context.state === 'suspended') {
+      return;
+    }
+
+    // Already suspending - return existing promise
+    if (this._suspendPromise) {
+      return this._suspendPromise;
+    }
+
+    // Start suspend operation
+    this._suspendPromise = (async () => {
       try {
-        await this._context.suspend();
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Checked above
+        await this._context!.suspend();
         log.debug('AudioContext suspended');
       } catch (error) {
         log.error('Failed to suspend AudioContext:', error);
+        // Don't throw - suspend failures are less critical
+      } finally {
+        // Clear promise after completion
+        this._suspendPromise = null;
       }
-    }
+    })();
+
+    return this._suspendPromise;
   }
 
   /**

@@ -10,7 +10,13 @@
  * Payload formats vary by message type - see MESSAGE_CODECS
  */
 
-import type { IncomingMessage, OutgoingMessage } from '../types/messages';
+import type {
+  IncomingMessage,
+  OutgoingMessage,
+  AudioChunkMessage,
+  BlendshapeFrameMessage,
+  SyncFrameMessage
+} from '../types/messages';
 
 // Message type codes (1 byte)
 export enum MessageTypeCode {
@@ -142,7 +148,7 @@ export class BinaryProtocol {
    * Encode generic message with JSON payload
    * Format: [type:1][timestamp:4][json_length:4][json_data:n]
    */
-  private static encodeGeneric(typeCode: MessageTypeCode, message: any): ArrayBuffer {
+  private static encodeGeneric(typeCode: MessageTypeCode, message: OutgoingMessage): ArrayBuffer {
     const jsonStr = JSON.stringify(message);
     const jsonBytes = new TextEncoder().encode(jsonStr);
 
@@ -167,22 +173,23 @@ export class BinaryProtocol {
    * Decode audio chunk message
    * Format: [type:1][timestamp:4][audio_data:n]
    */
-  private static decodeAudioChunk(type: string, timestamp: number, buffer: ArrayBuffer): IncomingMessage {
+  private static decodeAudioChunk(type: string, timestamp: number, buffer: ArrayBuffer): AudioChunkMessage {
     const headerSize = 5;
     const audioData = buffer.slice(headerSize);
 
     return {
-      type: type as any,
-      audio: audioData,
+      type: 'audio_chunk',
+      data: audioData,
       timestamp,
-    } as any;
+      sessionId: '', // SessionId not included in binary protocol, set by handler
+    };
   }
 
   /**
    * Decode blendshape message
    * Format: [type:1][timestamp:4][weights:52*4 bytes as float32]
    */
-  private static decodeBlendshape(type: string, timestamp: number, buffer: ArrayBuffer): IncomingMessage {
+  private static decodeBlendshape(type: string, timestamp: number, buffer: ArrayBuffer): BlendshapeFrameMessage {
     const headerSize = 5;
     const weightsData = new Float32Array(buffer, headerSize, 52);
 
@@ -190,18 +197,25 @@ export class BinaryProtocol {
     const weights = new Float32Array(52);
     weights.set(weightsData);
 
+    // Convert to Record<string, number> as expected by BlendshapeFrameMessage
+    const weightsRecord: Record<string, number> = {};
+    weights.forEach((value, index) => {
+      weightsRecord[`blend_${index}`] = value;
+    });
+
     return {
-      type: type as any,
-      weights: Array.from(weights),
+      type: 'blendshape',
+      weights: weightsRecord,
       timestamp,
-    } as any;
+      sessionId: '', // SessionId not included in binary protocol, set by handler
+    };
   }
 
   /**
    * Decode sync_frame message
    * Format: [type:1][timestamp:4][audio_length:4][audio_data:n][weights:52*4 bytes]
    */
-  private static decodeSyncFrame(type: string, timestamp: number, buffer: ArrayBuffer): IncomingMessage {
+  private static decodeSyncFrame(type: string, timestamp: number, buffer: ArrayBuffer): SyncFrameMessage {
     const view = new DataView(buffer);
     const headerSize = 5;
 
@@ -218,12 +232,25 @@ export class BinaryProtocol {
     const weights = new Float32Array(52);
     weights.set(weightsData);
 
+    // Convert to Record<string, number> and base64 encode audio
+    const weightsRecord: Record<string, number> = {};
+    weights.forEach((value, index) => {
+      weightsRecord[`blend_${index}`] = value;
+    });
+
+    // Convert ArrayBuffer to base64
+    const bytes = new Uint8Array(audioData);
+    const binary = String.fromCharCode.apply(null, Array.from(bytes));
+    const base64Audio = btoa(binary);
+
     return {
-      type: type as any,
-      audio: audioData,
-      weights: Array.from(weights),
+      type: 'sync_frame',
+      audio: base64Audio,
+      weights: weightsRecord,
       timestamp,
-    } as any;
+      sessionId: '', // SessionId not included in binary protocol, set by handler
+      frameIndex: 0, // FrameIndex not included in binary protocol, set by handler
+    };
   }
 
   /**
@@ -249,7 +276,7 @@ export class BinaryProtocol {
   /**
    * Check if binary protocol is supported by checking message type
    */
-  static isBinaryMessage(data: any): boolean {
+  static isBinaryMessage(data: unknown): boolean {
     return data instanceof ArrayBuffer;
   }
 

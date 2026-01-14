@@ -23,7 +23,7 @@
  * ```
  */
 
-import { setConfig } from './config';
+import { setConfig, type AppConfig } from './config';
 import { LazyAvatar } from './avatar/LazyAvatar';
 import { ChatManager } from './managers/ChatManager';
 import { logger, LogLevel } from './utils/Logger';
@@ -71,6 +71,8 @@ class AvatarChatElement extends HTMLElement {
   private _isMounted = false;
   private _isConnected = false;
   private _isCollapsed = false;
+  private themeMediaQuery: MediaQueryList | null = null;
+  private themeChangeHandler: ((e: MediaQueryListEvent) => void) | null = null;
 
   constructor() {
     super();
@@ -96,7 +98,7 @@ class AvatarChatElement extends HTMLElement {
     // Update global config for services - only URL is needed for widget
     setConfig({
       websocket: { url: this.config.serverUrl },
-    } as any);
+    } as Partial<AppConfig>);
   }
 
   /**
@@ -122,7 +124,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Set dimensions
     this.style.width = `${this.config.width}px`;
-    this.style.height = `${this.config.height}px`;
+    this.style.maxHeight = `${this.config.height}px`;
 
     // Check if starting collapsed
     if (this.config.startCollapsed) {
@@ -149,8 +151,9 @@ class AvatarChatElement extends HTMLElement {
     // Add widget HTML
     const container = document.createElement('div');
     container.innerHTML = WIDGET_TEMPLATE;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Template always has root element
     const root = container.firstElementChild!;
-    
+
     // Apply theme
     if (this.config.theme === 'dark') {
       root.classList.add('theme-dark');
@@ -173,7 +176,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Hide text input if disabled
     if (!this.config.enableText) {
-      const inputSection = this.shadow.querySelector('.input-section');
+      const inputSection = this.shadow.querySelector('.chat-input-area');
       if (inputSection) (inputSection as HTMLElement).style.display = 'none';
     }
 
@@ -192,6 +195,7 @@ class AvatarChatElement extends HTMLElement {
 
     const container = document.createElement('div');
     container.innerHTML = BUBBLE_TEMPLATE;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Template always has bubble element
     const bubble = container.firstElementChild!;
     
     bubble.addEventListener('click', () => this.expand());
@@ -207,15 +211,15 @@ class AvatarChatElement extends HTMLElement {
    */
   private async initializeAvatar(): Promise<void> {
     const avatarContainer = this.shadow.getElementById('avatarCircle');
+
     if (!avatarContainer) {
       log.error('Avatar container not found');
       return;
     }
 
-    // Create render container
+    // Create render container with proper class for CSS styling
     const renderContainer = document.createElement('div');
-    renderContainer.style.width = '400px';
-    renderContainer.style.height = '400px';
+    renderContainer.className = 'avatar-render-container';
     avatarContainer.appendChild(renderContainer);
 
     try {
@@ -293,22 +297,24 @@ class AvatarChatElement extends HTMLElement {
    */
   private setupUIEvents(): void {
     // Minimize button
-    const minimizeBtn = this.shadow.querySelector('.minimize-btn');
+    const minimizeBtn = this.shadow.getElementById('minimizeBtn');
     minimizeBtn?.addEventListener('click', () => this.collapse());
 
-    // Auto-theme listener
+    // Auto-theme listener with proper cleanup
     if (this.config.theme === 'auto') {
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      this.themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      this.themeChangeHandler = (e) => {
         const root = this.shadow.querySelector('.widget-root');
         root?.classList.toggle('theme-dark', e.matches);
-      });
+      };
+      this.themeMediaQuery.addEventListener('change', this.themeChangeHandler);
     }
   }
 
   /**
    * Update connection status (stub - connection indicator removed from UI)
    */
-  private updateConnectionStatus(connected: boolean, state?: 'error'): void {
+  private updateConnectionStatus(_connected: boolean, _state?: 'error'): void {
     // Connection status indicator removed from UI for cleaner design
     // Connection state is still tracked internally and passed to callbacks
   }
@@ -318,9 +324,22 @@ class AvatarChatElement extends HTMLElement {
    */
   collapse(): void {
     if (this._isCollapsed) return;
-    
+
+    // Stop audio and reset avatar state before collapsing
+    if (this.chatManager) {
+      this.chatManager.resetOnMinimize();
+    }
+
     this._isCollapsed = true;
     this.classList.add('collapsed');
+
+    // Hide the widget root but don't destroy it
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+    if (widgetRoot) {
+      widgetRoot.style.display = 'none';
+    }
+
+    // Show bubble
     this.renderBubble();
   }
 
@@ -333,9 +352,19 @@ class AvatarChatElement extends HTMLElement {
     this._isCollapsed = false;
     this.classList.remove('collapsed');
     this.style.width = `${this.config.width}px`;
-    this.style.height = `${this.config.height}px`;
-    
-    await this.renderWidget();
+    this.style.maxHeight = `${this.config.height}px`;
+
+    // Check if widget is already initialized
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+    if (widgetRoot) {
+      // Widget exists, just show it and remove bubble
+      const bubble = this.shadow.querySelector('.chat-bubble');
+      if (bubble) bubble.remove();
+      widgetRoot.style.display = 'flex';
+    } else {
+      // First time expanding, render everything
+      await this.renderWidget();
+    }
   }
 
   /**
@@ -376,10 +405,28 @@ class AvatarChatElement extends HTMLElement {
   }
 
   /**
+   * Manually reconnect to the server
+   * Useful after network changes or connection failures
+   */
+  async reconnect(): Promise<void> {
+    if (!this.chatManager) {
+      throw new Error('Widget not initialized');
+    }
+    return this.chatManager.reconnect();
+  }
+
+  /**
    * Cleanup
    */
   destroy(): void {
     log.info('Destroying widget');
+
+    // Remove theme listener to prevent memory leak
+    if (this.themeMediaQuery && this.themeChangeHandler) {
+      this.themeMediaQuery.removeEventListener('change', this.themeChangeHandler);
+      this.themeMediaQuery = null;
+      this.themeChangeHandler = null;
+    }
 
     if (this.chatManager) {
       this.chatManager.dispose();
@@ -393,7 +440,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Clear shadow DOM
     this.shadow.innerHTML = '';
-    
+
     // Remove from DOM
     this.remove();
 
@@ -451,8 +498,73 @@ export const AvatarChat = {
     if (!config.serverUrl) {
       throw new Error('AvatarChat.init(): serverUrl is required');
     }
+
+    // Validate serverUrl format
+    if (!config.serverUrl.match(/^wss?:\/\/.+/)) {
+      throw new Error('AvatarChat.init(): serverUrl must be a valid WebSocket URL (ws:// or wss://)');
+    }
+
     if (!config.container) {
       throw new Error('AvatarChat.init(): container is required');
+    }
+
+    // Validate container is a valid DOM element or selector
+    const containerElement = typeof config.container === 'string'
+      ? document.querySelector(config.container)
+      : config.container;
+
+    if (!containerElement) {
+      throw new Error(`AvatarChat.init(): container not found: ${config.container}`);
+    }
+
+    // Validate dimensions if provided
+    if (config.width !== undefined) {
+      if (typeof config.width !== 'number' || config.width < 200 || config.width > 2000) {
+        throw new Error('AvatarChat.init(): width must be a number between 200 and 2000 pixels');
+      }
+    }
+
+    if (config.height !== undefined) {
+      if (typeof config.height !== 'number' || config.height < 300 || config.height > 2000) {
+        throw new Error('AvatarChat.init(): height must be a number between 300 and 2000 pixels');
+      }
+    }
+
+    // Validate callbacks if provided
+    if (config.onReady !== undefined && typeof config.onReady !== 'function') {
+      throw new Error('AvatarChat.init(): onReady must be a function');
+    }
+
+    if (config.onMessage !== undefined && typeof config.onMessage !== 'function') {
+      throw new Error('AvatarChat.init(): onMessage must be a function');
+    }
+
+    if (config.onError !== undefined && typeof config.onError !== 'function') {
+      throw new Error('AvatarChat.init(): onError must be a function');
+    }
+
+    // Validate logLevel if provided
+    if (config.logLevel !== undefined) {
+      const validLogLevels = ['none', 'error', 'warn', 'info', 'debug'];
+      if (!validLogLevels.includes(config.logLevel)) {
+        throw new Error(`AvatarChat.init(): logLevel must be one of: ${validLogLevels.join(', ')}`);
+      }
+    }
+
+    // Validate theme if provided
+    if (config.theme !== undefined) {
+      const validThemes = ['light', 'dark', 'auto'];
+      if (!validThemes.includes(config.theme)) {
+        throw new Error(`AvatarChat.init(): theme must be one of: ${validThemes.join(', ')}`);
+      }
+    }
+
+    // Validate position if provided
+    if (config.position !== undefined) {
+      const validPositions = ['inline', 'bottom-right', 'bottom-left', 'top-right', 'top-left'];
+      if (!validPositions.includes(config.position)) {
+        throw new Error(`AvatarChat.init(): position must be one of: ${validPositions.join(', ')}`);
+      }
     }
 
     // Auto-detect assets base URL if not provided
@@ -559,7 +671,7 @@ export const AvatarChat = {
 
 // Expose globally for script tag usage
 if (typeof window !== 'undefined') {
-  (window as any).AvatarChat = AvatarChat;
+  (window as { AvatarChat?: typeof AvatarChat }).AvatarChat = AvatarChat;
 }
 
 export default AvatarChat;

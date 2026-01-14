@@ -12,6 +12,7 @@ export class EventEmitter implements IEventEmitter {
     if (!this.events.has(event)) {
       this.events.set(event, new Set());
     }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Set created above
     this.events.get(event)!.add(callback);
   }
 
@@ -25,7 +26,7 @@ export class EventEmitter implements IEventEmitter {
     }
   }
 
-  emit(event: string, data?: any): void {
+  emit(event: string, data?: unknown): void {
     const callbacks = this.events.get(event);
     if (callbacks) {
       callbacks.forEach(callback => {

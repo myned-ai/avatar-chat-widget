@@ -131,7 +131,9 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._avatar = new GaussianAvatar(this._container, this._assetsPath);
       
       // Start rendering - this creates the canvas (await it!)
-      await (this._avatar as any).start?.();
+      if ('start' in this._avatar && typeof (this._avatar as { start?: () => Promise<void> }).start === 'function') {
+        await (this._avatar as { start: () => Promise<void> }).start();
+      }
       
       // Apply any pending state
       if (this._pendingState !== 'Idle') {
@@ -164,7 +166,9 @@ export class LazyAvatar implements IAvatarController, Disposable {
    */
   public start(): void {
     if (this._avatar) {
-      (this._avatar as any).start?.();
+      if ('start' in this._avatar && typeof (this._avatar as { start?: () => void }).start === 'function') {
+        (this._avatar as { start: () => void }).start();
+      }
     } else {
       // Will start automatically when loaded
       this.load();
@@ -211,14 +215,14 @@ export class LazyAvatar implements IAvatarController, Disposable {
   }
 
   public pause(): void {
-    if (this._avatar && 'pause' in this._avatar) {
-      (this._avatar as any).pause();
+    if (this._avatar && 'pause' in this._avatar && typeof (this._avatar as { pause?: () => void }).pause === 'function') {
+      (this._avatar as { pause: () => void }).pause();
     }
   }
 
   public resume(): void {
-    if (this._avatar && 'resume' in this._avatar) {
-      (this._avatar as any).resume();
+    if (this._avatar && 'resume' in this._avatar && typeof (this._avatar as { resume?: () => void }).resume === 'function') {
+      (this._avatar as { resume: () => void }).resume();
     }
   }
   

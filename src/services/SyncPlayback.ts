@@ -4,7 +4,7 @@
 
 import { AudioContextManager } from './AudioContextManager';
 import { logger } from '../utils/Logger';
-import { ARKIT_BLENDSHAPE_NAMES, createNeutralWeights, copyWeights } from '../constants/arkit';
+import { createNeutralWeights } from '../constants/arkit';
 import type { Disposable } from '../types/common';
 
 const log = logger.scope('SyncPlayback');
@@ -228,6 +228,7 @@ export class SyncPlayback implements Disposable {
     const lookAhead = 0.15;
     
     while (this.frameBuffer.length > 0 && this.nextPlayTime < currentTime + lookAhead) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Length checked above
       const frame = this.frameBuffer.shift()!;
       
       try {

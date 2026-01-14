@@ -105,8 +105,8 @@ export default defineConfig({
     // Chunk size warnings
     chunkSizeWarningLimit: 2000,
 
-    // Don't copy public folder for lib build
-    copyPublicDir: false,
+    // Copy public folder for lib build (worklet and default assets)
+    copyPublicDir: true,
 
     // Target modern browsers for smaller bundle
     target: 'es2020',

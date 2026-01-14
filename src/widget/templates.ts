@@ -1,6 +1,5 @@
 /**
  * Widget HTML Templates
- * Clean design based on index.html
  */
 
 export const WIDGET_TEMPLATE = `
@@ -17,40 +16,45 @@ export const WIDGET_TEMPLATE = `
     </div>
   </div>
 
-  <div id="chatMessages" class="messages-section" role="log" aria-live="polite" aria-atomic="false"></div>
+  <div class="chat-messages" id="chatMessages" role="log" aria-live="polite" aria-atomic="false">
+    <!-- Messages will be added here dynamically -->
+  </div>
 
-  <div class="input-section">
-    <input
-      type="text"
-      id="chatInput"
-      class="chat-input"
-      placeholder="Type a message..."
-      aria-label="Chat message input"
-      autocomplete="off"
-    />
-    <button
-      id="micBtn"
-      class="action-btn voice-btn"
-      aria-label="Voice input"
-      title="Voice input"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-        <line x1="12" x2="12" y1="19" y2="22"/>
-      </svg>
-    </button>
-    <button
-      id="sendBtn"
-      class="action-btn send-btn"
-      aria-label="Send message"
-      title="Send"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 2 11 13"/>
-        <path d="M22 2 15 22 11 13 2 9 22 2z"/>
-      </svg>
-    </button>
+  <div class="chat-input-area">
+    <div class="chat-input-wrapper">
+      <div class="chat-input-controls">
+        <input
+          type="text"
+          id="chatInput"
+          placeholder="Type a message..."
+          aria-label="Chat message input"
+          autocomplete="off"
+        />
+        <button
+          id="micBtn"
+          class="input-button"
+          aria-label="Voice input"
+          title="Voice input"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" x2="12" y1="19" y2="22"/>
+          </svg>
+        </button>
+        <button
+          id="sendBtn"
+          class="input-button"
+          aria-label="Send message"
+          title="Send"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2 11 13"/>
+            <path d="M22 2 15 22 11 13 2 9 22 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 `;

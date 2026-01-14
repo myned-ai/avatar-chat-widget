@@ -313,7 +313,7 @@ export class AudioInput implements Disposable {
 
       this.mediaRecorder.onerror = (event) => {
         errorBoundary.handleError(
-          new Error(`MediaRecorder error: ${(event as any).error}`),
+          new Error(`MediaRecorder error: ${(event as MediaRecorderErrorEvent).error}`),
           'audio-input'
         );
       };

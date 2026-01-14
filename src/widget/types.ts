@@ -83,6 +83,8 @@ export interface AvatarChatInstance {
   isMounted(): boolean;
   /** Check if connected to server */
   isConnected(): boolean;
+  /** Manually reconnect to the server (resets reconnection counter) */
+  reconnect(): Promise<void>;
 }
 
 /**

@@ -15,7 +15,7 @@ export type LogLevelType = typeof LogLevel[keyof typeof LogLevel];
 const isDevelopment = (): boolean => {
   try {
     // Vite injects these at build time - use dynamic access to avoid TS errors
-    const meta = (import.meta as any);
+    const meta = import.meta as { env?: { DEV?: boolean; MODE?: string } };
     if (meta?.env) {
       return meta.env.DEV === true || meta.env.MODE === 'development';
     }

@@ -19,6 +19,7 @@ export class SocketService extends EventEmitter implements Disposable {
   private heartbeatInterval: number | null = null;
   private messageQueue: OutgoingMessage[] = [];
   private readonly maxQueueSize = 100;
+  private readonly maxReconnectAttempts = 10;
   private isIntentionallyClosed = false;
   private useBinaryProtocol = false; // Disable binary protocol - backend expects JSON
   private authService: AuthService;
@@ -118,7 +119,7 @@ export class SocketService extends EventEmitter implements Disposable {
             data: event.data,
             timestamp: Date.now(),
             sessionId: '',
-          } as any;
+          };
         }
       } else {
         // JSON message (fallback for non-binary messages)
@@ -151,8 +152,27 @@ export class SocketService extends EventEmitter implements Disposable {
     }
 
     // Reconnect unless intentionally closed
-    if (!this.isIntentionallyClosed && this.reconnectAttempts < CONFIG.websocket.reconnectAttempts) {
-      this.scheduleReconnect();
+    if (!this.isIntentionallyClosed) {
+      // Check against configured max attempts or fallback to instance max
+      const maxAttempts = Math.min(CONFIG.websocket.reconnectAttempts, this.maxReconnectAttempts);
+
+      if (this.reconnectAttempts < maxAttempts) {
+        this.scheduleReconnect();
+      } else {
+        // Max attempts reached - give up
+        log.error(`Max reconnection attempts (${maxAttempts}) reached. Giving up.`);
+        this.setConnectionState('error');
+        this.emit('connection-failed', {
+          reason: 'max-retries',
+          attempts: this.reconnectAttempts
+        });
+
+        // Notify via error boundary
+        errorBoundary.handleError(
+          new Error(`Failed to connect after ${maxAttempts} attempts`),
+          'websocket'
+        );
+      }
     }
   }
 
@@ -163,8 +183,9 @@ export class SocketService extends EventEmitter implements Disposable {
 
     this.setConnectionState('reconnecting');
     const delay = this.calculateReconnectDelay();
-    
-    log.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${CONFIG.websocket.reconnectAttempts})`);
+    const maxAttempts = Math.min(CONFIG.websocket.reconnectAttempts, this.maxReconnectAttempts);
+
+    log.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${maxAttempts})`);
 
     this.reconnectTimeout = window.setTimeout(() => {
       this.reconnectTimeout = null;
@@ -187,7 +208,7 @@ export class SocketService extends EventEmitter implements Disposable {
   private startHeartbeat(): void {
     this.heartbeatInterval = window.setInterval(() => {
       if (this.isConnected()) {
-        this.send({ type: 'ping', timestamp: Date.now() } as any);
+        this.send({ type: 'ping', timestamp: Date.now() });
       }
     }, CONFIG.websocket.heartbeatInterval);
   }
@@ -209,6 +230,7 @@ export class SocketService extends EventEmitter implements Disposable {
       if (this.useBinaryProtocol) {
         // Use binary protocol (33% bandwidth savings vs base64)
         const binaryData = BinaryProtocol.encode(message);
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
         this.ws!.send(binaryData);
       } else {
         // Fallback: JSON with base64 encoding for audio
@@ -226,9 +248,11 @@ export class SocketService extends EventEmitter implements Disposable {
             ...message,
             data: base64Data,
           };
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
           this.ws!.send(JSON.stringify(jsonMessage));
         } else {
           // Send JSON data
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
           this.ws!.send(JSON.stringify(message));
         }
       }
@@ -248,6 +272,7 @@ export class SocketService extends EventEmitter implements Disposable {
 
   private flushMessageQueue(): void {
     while (this.messageQueue.length > 0 && this.isConnected()) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Length checked above
       const message = this.messageQueue.shift()!;
       this.send(message);
     }
@@ -268,9 +293,21 @@ export class SocketService extends EventEmitter implements Disposable {
     }
   }
 
+  /**
+   * Manually reconnect to the server
+   * Resets reconnection counter and attempts immediate connection
+   */
+  async reconnect(): Promise<void> {
+    log.info('Manual reconnect requested');
+    this.disconnect();
+    this.reconnectAttempts = 0; // Reset counter for fresh attempt
+    this.isIntentionallyClosed = false;
+    return this.connect();
+  }
+
   disconnect(): void {
     this.isIntentionallyClosed = true;
-    
+
     if (this.reconnectTimeout !== null) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;

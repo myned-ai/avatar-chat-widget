@@ -49,17 +49,20 @@ export class ChatManager implements Disposable {
   private currentSessionId: string | null = null;
   private userId: string;
   private messages: ChatMessage[] = [];
-  
+
   // UI Elements
   private chatMessages: HTMLElement;
   private chatInput: HTMLInputElement;
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
-  
+
   // State
   private isRecording = false;
   private animationFrameId: number | null = null;
   private useSyncPlayback = false;  // Flag to track which playback mode is active
+
+  // Streaming transcript state
+  private currentStreamingMessage: { id: string; element: HTMLElement; role: 'user' | 'assistant' } | null = null;
   
   // Options & Callbacks
   private options: ChatManagerOptions;
@@ -88,6 +91,7 @@ export class ChatManager implements Disposable {
     
     // Get UI elements - support Shadow DOM or document
     const root = options.shadowRoot || document;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Elements exist in template
     this.chatMessages = options.chatMessages || root.getElementById('chatMessages')!;
     this.chatInput = (options.chatInput || root.getElementById('chatInput')) as HTMLInputElement;
     this.sendBtn = (options.sendBtn || root.getElementById('sendBtn')) as HTMLButtonElement;
@@ -296,12 +300,15 @@ export class ChatManager implements Disposable {
     this.socketService.on('interrupt', (message: IncomingMessage) => {
       if (message.type === 'interrupt') {
         log.info('Interrupt received - stopping audio playback');
-        
+
         // Stop all playback systems
         this.syncPlayback.stop();
         this.audioOutput.stop();
         this.blendshapeBuffer.clear();
-        
+
+        // Finalize any streaming transcript
+        this.finalizeStreamingMessage();
+
         this.avatar.disableLiveBlendshapes();
         this.avatar.setChatState('Hello');
       }
@@ -309,20 +316,18 @@ export class ChatManager implements Disposable {
     
     // Handle transcript delta (real-time transcription)
     this.socketService.on('transcript_delta', (message: IncomingMessage) => {
-      if (message.type === 'transcript_delta') {
-        // Could update UI with real-time transcript streaming
-        log.debug(`Transcript delta [${message.role}]: ${message.text}`);
+      if (message.type === 'transcript_delta' && message.text) {
+        const role = message.role === 'assistant' ? 'assistant' : 'user';
+        this.streamTranscript(message.text, role);
       }
     });
-    
+
     // Handle completed transcript
     this.socketService.on('transcript_done', (message: IncomingMessage) => {
       if (message.type === 'transcript_done') {
         log.debug(`Transcript complete [${message.role}]: ${message.text}`);
-        // Add completed transcripts to chat
-        if (message.text) {
-          this.addMessage(message.text, message.role === 'assistant' ? 'assistant' : 'user');
-        }
+        // Finalize the streaming message
+        this.finalizeStreamingMessage();
       }
     });
     
@@ -354,19 +359,19 @@ export class ChatManager implements Disposable {
 
   private sendTextMessage(): void {
     const text = this.chatInput.value.trim();
-    
+
     if (!text) {
       return;
     }
-    
+
     // Transition from Idle to Hello (user is interacting)
     if (this.avatar.getChatState() === 'Idle') {
       this.avatar.setChatState('Hello');
     }
-    
+
     // Add to UI
     this.addMessage(text, 'user');
-    
+
     // Clear input
     this.chatInput.value = '';
 
@@ -400,7 +405,7 @@ export class ChatManager implements Disposable {
       // Use PCM16 format for OpenAI Realtime API
       const format = 'audio/pcm16';
       const sampleRate = 24000; // OpenAI Realtime API requires 24kHz
-      
+
       // Signal server that audio stream is starting
       const startMessage: AudioStreamStartMessage = {
         type: 'audio_stream_start',
@@ -525,13 +530,84 @@ export class ChatManager implements Disposable {
       sender,
       timestamp: Date.now(),
     };
-    
+
     this.messages.push(message);
     this.renderMessage(message);
     this.scrollToBottom();
-    
+
     // Notify widget callback
     this.options.onMessage?.({ role: sender, text });
+  }
+
+  /**
+   * Stream transcript text in real-time (word by word)
+   */
+  private streamTranscript(text: string, role: 'user' | 'assistant'): void {
+    // If no streaming message exists, create one
+    if (!this.currentStreamingMessage || this.currentStreamingMessage.role !== role) {
+      const messageId = Date.now().toString();
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${role}`;
+      messageEl.dataset.id = messageId;
+
+      const bubbleEl = document.createElement('div');
+      bubbleEl.className = 'message-bubble';
+      bubbleEl.textContent = text;
+
+      const timeEl = document.createElement('div');
+      timeEl.className = 'message-time';
+      timeEl.textContent = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      messageEl.appendChild(bubbleEl);
+      messageEl.appendChild(timeEl);
+      this.chatMessages.appendChild(messageEl);
+
+      this.currentStreamingMessage = {
+        id: messageId,
+        element: messageEl,
+        role
+      };
+
+      this.scrollToBottom();
+    } else {
+      // APPEND new text to existing streaming message (don't replace)
+      const bubbleEl = this.currentStreamingMessage.element.querySelector('.message-bubble');
+      if (bubbleEl) {
+        bubbleEl.textContent += text;
+        this.scrollToBottom();
+      }
+    }
+  }
+
+  /**
+   * Finalize the streaming message and add it to messages array
+   */
+  private finalizeStreamingMessage(): void {
+    if (!this.currentStreamingMessage) return;
+
+    const bubbleEl = this.currentStreamingMessage.element.querySelector('.message-bubble');
+    const text = bubbleEl?.textContent || '';
+
+    if (text) {
+      // Add to messages array
+      const message: ChatMessage = {
+        id: this.currentStreamingMessage.id,
+        text,
+        sender: this.currentStreamingMessage.role,
+        timestamp: Date.now(),
+      };
+
+      this.messages.push(message);
+
+      // Notify widget callback
+      this.options.onMessage?.({ role: this.currentStreamingMessage.role, text });
+    }
+
+    // Clear streaming state
+    this.currentStreamingMessage = null;
   }
 
   private renderMessage(message: ChatMessage): void {
@@ -573,41 +649,46 @@ export class ChatManager implements Disposable {
     }
   }
 
-  private resetOnMinimize(): void {
+  /**
+   * Reset chat state when minimizing (public API for widget)
+   */
+  resetOnMinimize(): void {
     // Stop recording if active
     if (this.isRecording) {
       this.stopRecording();
     }
-    
+
     // Stop all audio playback
     this.syncPlayback.stop();
     this.audioOutput.stop();
-    
+
     // Clear blendshape buffer and disable live mode
     this.blendshapeBuffer.clear();
     this.avatar.disableLiveBlendshapes();
-    
+
     // Reset avatar to idle and pause animation
     this.avatar.setChatState('Idle');
-    if ('pause' in this.avatar) {
-      (this.avatar as any).pause();
+
+    // Type-safe pause check
+    if ('pause' in this.avatar && typeof this.avatar.pause === 'function') {
+      (this.avatar as IAvatarController & { pause(): void }).pause();
     }
-    
+
     log.debug('Chat minimized - reset audio, animation, and avatar state');
   }
 
   private openChat(): void {
     const widget = document.getElementById('chatWidget');
     const bubble = document.getElementById('chatBubble');
-    
+
     widget?.classList.remove('minimized');
     bubble?.classList.add('hidden');
-    
-    // Resume avatar animation
-    if ('resume' in this.avatar) {
-      (this.avatar as any).resume();
+
+    // Resume avatar animation - type-safe check
+    if ('resume' in this.avatar && typeof this.avatar.resume === 'function') {
+      (this.avatar as IAvatarController & { resume(): void }).resume();
     }
-    
+
     // Focus the input
     this.chatInput?.focus();
   }
@@ -634,11 +715,18 @@ export class ChatManager implements Disposable {
     return bytes.buffer;
   }
 
+  /**
+   * Manually reconnect to the server
+   */
+  async reconnect(): Promise<void> {
+    return this.socketService.reconnect();
+  }
+
   dispose(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
     }
-    
+
     this.socketService.dispose();
     this.audioInput.dispose();
     this.audioOutput.dispose();

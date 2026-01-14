@@ -1,9 +1,18 @@
-// Error Boundary and Handler
+// Error Boundary and Handler with Time-Windowed Circuit Breaker
+
+interface ErrorWindow {
+  count: number;
+  firstError: number;
+  circuitOpen: boolean;
+  circuitOpenedAt?: number;
+}
 
 export class ErrorBoundary {
-  private errorHandlers: Map<string, (error: Error) => void> = new Map();
-  private errorCounts: Map<string, number> = new Map();
-  private readonly maxErrorsPerContext = 10;
+  private readonly errorHandlers: Map<string, (error: Error) => void> = new Map();
+  private readonly errorWindows: Map<string, ErrorWindow> = new Map();
+  private readonly maxErrorsPerWindow = 10;
+  private readonly errorWindowMs = 60000; // 1 minute
+  private readonly circuitResetMs = 30000; // 30 seconds to try recovery
 
   registerHandler(context: string, handler: (error: Error) => void): void {
     this.errorHandlers.set(context, handler);
@@ -12,15 +21,44 @@ export class ErrorBoundary {
   handleError(error: Error, context: string): void {
     console.error(`[${context}]`, error);
 
-    // Track error frequency
-    const count = (this.errorCounts.get(context) || 0) + 1;
-    this.errorCounts.set(context, count);
+    const now = Date.now();
+    const errorWindow = this.errorWindows.get(context);
 
-    // Circuit breaker: Stop handling if too many errors
-    if (count > this.maxErrorsPerContext) {
-      console.error(`Too many errors in context: ${context}. Circuit breaker triggered.`);
-      this.notifyUser(`Service temporarily unavailable: ${context}`);
-      return;
+    // Check if circuit breaker is open
+    if (errorWindow?.circuitOpen) {
+      // Try to reset circuit after cooldown period
+      if (errorWindow.circuitOpenedAt && (now - errorWindow.circuitOpenedAt) > this.circuitResetMs) {
+        console.info(`[${context}] Circuit breaker reset attempt - clearing error history`);
+        this.errorWindows.delete(context);
+      } else {
+        // Still in cooldown - skip error handling
+        console.warn(`[${context}] Circuit breaker open - error suppressed`);
+        return;
+      }
+    }
+
+    // Initialize or update error window
+    if (!errorWindow || (now - errorWindow.firstError) > this.errorWindowMs) {
+      // Start new error window
+      this.errorWindows.set(context, {
+        count: 1,
+        firstError: now,
+        circuitOpen: false,
+      });
+    } else {
+      // Increment error count in current window
+      errorWindow.count++;
+
+      // Trip circuit breaker if threshold exceeded
+      if (errorWindow.count > this.maxErrorsPerWindow) {
+        errorWindow.circuitOpen = true;
+        errorWindow.circuitOpenedAt = now;
+        console.error(
+          `[${context}] Too many errors (${errorWindow.count} in ${this.errorWindowMs}ms). Circuit breaker triggered for ${this.circuitResetMs}ms.`
+        );
+        this.notifyUser(`Service temporarily unavailable: ${context}. Retrying in ${this.circuitResetMs / 1000}s...`);
+        return;
+      }
     }
 
     // Call custom handler if registered
@@ -57,16 +95,36 @@ export class ErrorBoundary {
     window.dispatchEvent(event);
   }
 
+  /**
+   * Reset error tracking for a context (or all contexts)
+   */
   reset(context?: string): void {
     if (context) {
-      this.errorCounts.delete(context);
+      this.errorWindows.delete(context);
     } else {
-      this.errorCounts.clear();
+      this.errorWindows.clear();
     }
   }
 
+  /**
+   * Get current error count for a context
+   */
   getErrorCount(context: string): number {
-    return this.errorCounts.get(context) || 0;
+    return this.errorWindows.get(context)?.count || 0;
+  }
+
+  /**
+   * Check if circuit breaker is open for a context
+   */
+  isCircuitOpen(context: string): boolean {
+    return this.errorWindows.get(context)?.circuitOpen || false;
+  }
+
+  /**
+   * Get error window stats for monitoring/debugging
+   */
+  getStats(context: string): ErrorWindow | null {
+    return this.errorWindows.get(context) || null;
   }
 }
 

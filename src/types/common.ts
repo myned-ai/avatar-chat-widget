@@ -6,14 +6,14 @@ export interface Disposable {
 
 export type ChatState = 'Idle' | 'Hello' | 'Responding';
 
-export interface EventCallback<T = any> {
+export interface EventCallback<T = unknown> {
   (data: T): void;
 }
 
 export interface EventEmitter {
   on(event: string, callback: EventCallback): void;
   off(event: string, callback: EventCallback): void;
-  emit(event: string, data?: any): void;
+  emit(event: string, data?: unknown): void;
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';

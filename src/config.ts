@@ -67,7 +67,7 @@ const DEFAULT_CONFIG: AppConfig = {
     enabled: false, // Dev mode: auth disabled for local testing
   },
   websocket: {
-    url: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_WS_URL) || 'ws://localhost:8080/ws',
+    url: (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_WS_URL?: string } }).env?.VITE_WS_URL) || 'ws://localhost:8080/ws',
     reconnectAttempts: 5,
     initialReconnectDelay: 1000, // ms
     maxReconnectDelay: 30000, // ms
@@ -119,13 +119,42 @@ const DEFAULT_CONFIG: AppConfig = {
   },
 };
 
-// Mutable config that can be updated at runtime
-let runtimeConfig: AppConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+/**
+ * Deep clone utility that preserves functions, dates, and other non-JSON types
+ */
+function deepClone<T>(obj: T): T {
+  // Handle null and non-objects
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Handle Date
+  if (obj instanceof Date) {
+    return new Date(obj.getTime()) as T;
+  }
+
+  // Handle Array
+  if (Array.isArray(obj)) {
+    return obj.map(item => deepClone(item)) as T;
+  }
+
+  // Handle Object
+  const clonedObj = {} as T;
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      clonedObj[key] = deepClone(obj[key]);
+    }
+  }
+  return clonedObj;
+}
+
+// Mutable config that can be updated at runtime (use proper deep clone)
+let runtimeConfig: AppConfig = deepClone(DEFAULT_CONFIG);
 
 /**
- * Deep merge utility
+ * Deep merge utility that preserves functions and non-JSON values
  */
-function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
+function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
   const result = { ...target };
   for (const key in source) {
     if (source[key] !== undefined) {
@@ -133,11 +162,12 @@ function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>)
         typeof source[key] === 'object' &&
         source[key] !== null &&
         !Array.isArray(source[key]) &&
-        typeof target[key] === 'object'
+        typeof target[key] === 'object' &&
+        typeof source[key] !== 'function'
       ) {
-        result[key] = deepMerge(target[key], source[key] as any);
+        result[key] = deepMerge(target[key] as Record<string, unknown>, source[key] as Record<string, unknown>) as T[Extract<keyof T, string>];
       } else {
-        result[key] = source[key] as any;
+        result[key] = source[key] as T[Extract<keyof T, string>];
       }
     }
   }
@@ -160,19 +190,34 @@ export function setConfig(config: Partial<AppConfig>): void {
 }
 
 /**
- * Reset to default configuration
+ * Reset to default configuration (preserves functions and non-JSON values)
  */
 export function resetConfig(): void {
-  runtimeConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  runtimeConfig = deepClone(DEFAULT_CONFIG);
 }
 
 /**
  * Legacy CONFIG export for backward compatibility
  * Proxies to runtimeConfig for seamless migration
+ * Read-only with proper validation
  */
-export const CONFIG: AppConfig = new Proxy({} as AppConfig, {
-  get(_target, prop: string) {
-    return runtimeConfig[prop as keyof AppConfig];
+export const CONFIG: Readonly<AppConfig> = new Proxy(runtimeConfig, {
+  get(target, prop: string | symbol) {
+    // Only allow string properties that exist in AppConfig
+    if (typeof prop === 'string' && prop in target) {
+      return target[prop as keyof AppConfig];
+    }
+    // Handle Symbol properties (for iterators, etc.)
+    if (typeof prop === 'symbol') {
+      return (target as Record<symbol, unknown>)[prop];
+    }
+    throw new Error(`Invalid config property: ${String(prop)}`);
+  },
+  set(_target, prop: string | symbol) {
+    throw new Error(`CONFIG is read-only. Use setConfig() to update. Attempted to set: ${String(prop)}`);
+  },
+  deleteProperty(_target, prop: string | symbol) {
+    throw new Error(`CONFIG is read-only. Cannot delete property: ${String(prop)}`);
   },
 });
 
