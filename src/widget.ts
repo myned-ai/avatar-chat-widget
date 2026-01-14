@@ -484,11 +484,11 @@ export const AvatarChat = {
       const src = scripts[i].src;
       if (src.includes('jsdelivr.net') && src.includes('avatar-chat-widget')) {
         const baseUrl = src.substring(0, src.lastIndexOf('/'));
-        return `${baseUrl}/public/asset/nyx.zip`;
+        return `${baseUrl}/avatar-chat-widget/public/asset/nyx.zip`;
       }
       if (src.includes('unpkg.com') && src.includes('avatar-chat-widget')) {
         const baseUrl = src.substring(0, src.lastIndexOf('/'));
-        return `${baseUrl}/public/asset/nyx.zip`;
+        return `${baseUrl}/avatar-chat-widget/public/asset/nyx.zip`;
       }
     }
     // Fallback for npm usage or local development
