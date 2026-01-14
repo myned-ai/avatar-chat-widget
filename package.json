@@ -1,6 +1,6 @@
 {
     "name": "@myned-ai/avatar-chat-widget",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "module",
     "description": "Real-time voice/text chat widget with 3D avatar animation",
     "author": "Myned AI",
