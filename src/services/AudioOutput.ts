@@ -188,7 +188,7 @@ export class AudioOutput implements Disposable {
     // Stop ALL active source nodes
     for (const source of this.activeSourceNodes) {
       try {
-        source.stop();
+        source.stop(0);
         source.disconnect();
       } catch {
         // Ignore if already stopped

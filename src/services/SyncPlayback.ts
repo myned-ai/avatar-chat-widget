@@ -162,7 +162,7 @@ export class SyncPlayback implements Disposable {
     // Clear any existing source nodes
     for (const source of this.activeSourceNodes) {
       try {
-        source.stop();
+        source.stop(0);
         source.disconnect();
       } catch {
         // Ignore if already stopped
@@ -447,7 +447,7 @@ export class SyncPlayback implements Disposable {
     // Stop all active audio sources
     for (const source of this.activeSourceNodes) {
       try {
-        source.stop();
+        source.stop(0);
         source.disconnect();
       } catch {
         // Ignore if already stopped

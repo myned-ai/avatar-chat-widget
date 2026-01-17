@@ -61,8 +61,11 @@ export class ChatManager implements Disposable {
   private animationFrameId: number | null = null;
   private useSyncPlayback = false;  // Flag to track which playback mode is active
 
-  // Streaming transcript state
-  private currentStreamingMessage: { id: string; element: HTMLElement; role: 'user' | 'assistant' } | null = null;
+  // Streaming transcript state - separate tracking for user and assistant to avoid mixing
+  private streamingMessages: {
+    user: { id: string; element: HTMLElement } | null;
+    assistant: { id: string; element: HTMLElement } | null;
+  } = { user: null, assistant: null };
   
   // Options & Callbacks
   private options: ChatManagerOptions;
@@ -317,6 +320,8 @@ export class ChatManager implements Disposable {
     // Handle transcript delta (real-time transcription)
     this.socketService.on('transcript_delta', (message: IncomingMessage) => {
       if (message.type === 'transcript_delta' && message.text) {
+        // DEBUG: Log raw role value from server
+        console.log('transcript_delta raw:', { role: message.role, text: message.text });
         const role = message.role === 'assistant' ? 'assistant' : 'user';
         this.streamTranscript(message.text, role);
       }
@@ -326,8 +331,9 @@ export class ChatManager implements Disposable {
     this.socketService.on('transcript_done', (message: IncomingMessage) => {
       if (message.type === 'transcript_done') {
         log.debug(`Transcript complete [${message.role}]: ${message.text}`);
-        // Finalize the streaming message
-        this.finalizeStreamingMessage();
+        // Finalize only the streaming message for this specific role
+        const role = message.role === 'assistant' ? 'assistant' : 'user';
+        this.finalizeStreamingMessage(role);
       }
     });
     
@@ -541,10 +547,13 @@ export class ChatManager implements Disposable {
 
   /**
    * Stream transcript text in real-time (word by word)
+   * Uses separate tracking for user and assistant to prevent mixing during interrupts
    */
   private streamTranscript(text: string, role: 'user' | 'assistant'): void {
-    // If no streaming message exists, create one
-    if (!this.currentStreamingMessage || this.currentStreamingMessage.role !== role) {
+    const currentMessage = this.streamingMessages[role];
+
+    // If no streaming message exists for this role, create one
+    if (!currentMessage) {
       const messageId = Date.now().toString();
       const messageEl = document.createElement('div');
       messageEl.className = `message ${role}`;
@@ -552,7 +561,8 @@ export class ChatManager implements Disposable {
 
       const bubbleEl = document.createElement('div');
       bubbleEl.className = 'message-bubble';
-      bubbleEl.textContent = text;
+      // DEBUG: Prefix with role to track where deltas go
+      bubbleEl.textContent = `${role}: ${text}`;
 
       const timeEl = document.createElement('div');
       timeEl.className = 'message-time';
@@ -565,49 +575,55 @@ export class ChatManager implements Disposable {
       messageEl.appendChild(timeEl);
       this.chatMessages.appendChild(messageEl);
 
-      this.currentStreamingMessage = {
+      this.streamingMessages[role] = {
         id: messageId,
-        element: messageEl,
-        role
+        element: messageEl
       };
 
       this.scrollToBottom();
     } else {
-      // APPEND new text to existing streaming message (don't replace)
-      const bubbleEl = this.currentStreamingMessage.element.querySelector('.message-bubble');
+      // APPEND new text to existing streaming message for this role
+      // DEBUG: Show role on each append too
+      const bubbleEl = currentMessage.element.querySelector('.message-bubble');
       if (bubbleEl) {
-        bubbleEl.textContent += text;
+        bubbleEl.textContent += `[${role}]${text}`;
         this.scrollToBottom();
       }
     }
   }
 
   /**
-   * Finalize the streaming message and add it to messages array
+   * Finalize streaming message(s) and add to messages array
+   * @param role - Optional role to finalize. If not specified, finalizes both.
    */
-  private finalizeStreamingMessage(): void {
-    if (!this.currentStreamingMessage) return;
+  private finalizeStreamingMessage(role?: 'user' | 'assistant'): void {
+    const rolesToFinalize = role ? [role] : (['user', 'assistant'] as const);
 
-    const bubbleEl = this.currentStreamingMessage.element.querySelector('.message-bubble');
-    const text = bubbleEl?.textContent || '';
+    for (const r of rolesToFinalize) {
+      const streamingMsg = this.streamingMessages[r];
+      if (!streamingMsg) continue;
 
-    if (text) {
-      // Add to messages array
-      const message: ChatMessage = {
-        id: this.currentStreamingMessage.id,
-        text,
-        sender: this.currentStreamingMessage.role,
-        timestamp: Date.now(),
-      };
+      const bubbleEl = streamingMsg.element.querySelector('.message-bubble');
+      const text = bubbleEl?.textContent || '';
 
-      this.messages.push(message);
+      if (text) {
+        // Add to messages array
+        const message: ChatMessage = {
+          id: streamingMsg.id,
+          text,
+          sender: r,
+          timestamp: Date.now(),
+        };
 
-      // Notify widget callback
-      this.options.onMessage?.({ role: this.currentStreamingMessage.role, text });
+        this.messages.push(message);
+
+        // Notify widget callback
+        this.options.onMessage?.({ role: r, text });
+      }
+
+      // Clear streaming state for this role
+      this.streamingMessages[r] = null;
     }
-
-    // Clear streaming state
-    this.currentStreamingMessage = null;
   }
 
   private renderMessage(message: ChatMessage): void {
