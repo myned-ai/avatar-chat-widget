@@ -419,13 +419,22 @@ class AvatarChatElement extends HTMLElement {
     }
     return this.chatManager.reconnect();
   }
+   * Web Component lifecycle: Called when element is removed from DOM
+   * Ensures cleanup happens even if element is removed externally (not via destroy())
+   */
+  disconnectedCallback(): void {
+    // Only cleanup if we were mounted and haven't already been destroyed
+    // This prevents double-cleanup if destroy() was called first (which calls this.remove())
+    if (this._isMounted) {
+      log.info('Widget removed from DOM - cleaning up resources');
+      this.cleanup();
+    }
+  }
 
   /**
-   * Cleanup
+   * Internal cleanup logic (shared by destroy() and disconnectedCallback())
    */
-  destroy(): void {
-    log.info('Destroying widget');
-
+  private cleanup(): void {
     // Remove theme listener to prevent memory leak
     if (this.themeMediaQuery && this.themeChangeHandler) {
       this.themeMediaQuery.removeEventListener('change', this.themeChangeHandler);
@@ -446,11 +455,21 @@ class AvatarChatElement extends HTMLElement {
     // Clear shadow DOM
     this.shadow.innerHTML = '';
 
-    // Remove from DOM
-    this.remove();
-
     this._isMounted = false;
     this._isConnected = false;
+  }
+
+  /**
+   * Cleanup and remove from DOM
+   */
+  destroy(): void {
+    log.info('Destroying widget');
+
+    this.cleanup();
+
+    // Remove from DOM (this will trigger disconnectedCallback, but cleanup() will be skipped
+    // since _isMounted is already false)
+    this.remove();
   }
 }
 
