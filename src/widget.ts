@@ -419,6 +419,8 @@ class AvatarChatElement extends HTMLElement {
     }
     return this.chatManager.reconnect();
   }
+
+  /**
    * Web Component lifecycle: Called when element is removed from DOM
    * Ensures cleanup happens even if element is removed externally (not via destroy())
    */

@@ -62,10 +62,19 @@ export class ChatManager implements Disposable {
   private useSyncPlayback = false;  // Flag to track which playback mode is active
 
   // Streaming transcript state - separate tracking for user and assistant to avoid mixing
-  private streamingMessages: {
-    user: { id: string; element: HTMLElement } | null;
-    assistant: { id: string; element: HTMLElement } | null;
-  } = { user: null, assistant: null };
+  // Map streaming messages by provider item id. Fallback to generated id when absent.
+  private streamingByItem: Map<string, { role: 'user' | 'assistant'; element: HTMLElement }> = new Map();
+  // Keep quick lookup of the latest item id per role (backward compatibility)
+  private latestItemForRole: { user?: string; assistant?: string } = {};
+  // Buffered deltas for itemIds not yet known; key = itemId (or temp id)
+  private bufferedDeltas: Map<string, string[]> = new Map();
+  // Timeout handles for buffered items (auto-flush)
+  private bufferTimeouts: Map<string, number> = new Map();
+  // Buffer wait ms (tuneable)
+  private readonly BUFFER_WAIT_MS = 200;
+  // Control whether assistant transcript is shown incrementally or only on finalize
+  // Set to `false` to show assistant text as a whole when completed
+  private readonly SHOW_ASSISTANT_STREAMING = false;
   
   // Options & Callbacks
   private options: ChatManagerOptions;
@@ -309,8 +318,9 @@ export class ChatManager implements Disposable {
         this.audioOutput.stop();
         this.blendshapeBuffer.clear();
 
-        // Finalize any streaming transcript
-        this.finalizeStreamingMessage();
+        // Finalize specific item if provided, else finalize assistant fallback
+        const interruptedItem = (message as any).itemId as string | undefined;
+        this.finalizeStreamingMessage(interruptedItem, 'assistant', true);
 
         this.avatar.disableLiveBlendshapes();
         this.avatar.setChatState('Hello');
@@ -323,7 +333,10 @@ export class ChatManager implements Disposable {
         // DEBUG: Log raw role value from server
         console.log('transcript_delta raw:', { role: message.role, text: message.text });
         const role = message.role === 'assistant' ? 'assistant' : 'user';
-        this.streamTranscript(message.text, role);
+        const itemId = (message as any).itemId as string | undefined;
+        const previousItemId = (message as any).previousItemId as string | undefined;
+
+        this.streamTranscript(message.text, role, itemId, previousItemId);
       }
     });
 
@@ -331,9 +344,10 @@ export class ChatManager implements Disposable {
     this.socketService.on('transcript_done', (message: IncomingMessage) => {
       if (message.type === 'transcript_done') {
         log.debug(`Transcript complete [${message.role}]: ${message.text}`);
-        // Finalize only the streaming message for this specific role
         const role = message.role === 'assistant' ? 'assistant' : 'user';
-        this.finalizeStreamingMessage(role);
+        const itemId = (message as any).itemId as string | undefined;
+        const interrupted = !!(message as any).interrupted;
+        this.finalizeStreamingMessage(itemId, role, interrupted);
       }
     });
     
@@ -546,83 +560,237 @@ export class ChatManager implements Disposable {
   }
 
   /**
-   * Stream transcript text in real-time (word by word)
-   * Uses separate tracking for user and assistant to prevent mixing during interrupts
+   * Item-aware streaming transcript: uses server-provided itemId and previousItemId
    */
-  private streamTranscript(text: string, role: 'user' | 'assistant'): void {
-    const currentMessage = this.streamingMessages[role];
+  private streamTranscript(text: string, role: 'user' | 'assistant', itemId?: string, previousItemId?: string): void {
+    // Determine effective id
+    const effectiveId = itemId || `${role}_${Date.now().toString()}`;
 
-    // If no streaming message exists for this role, create one
-    if (!currentMessage) {
-      const messageId = Date.now().toString();
+    // If assistant streaming is disabled, just buffer the parts and return
+    if (role === 'assistant' && !this.SHOW_ASSISTANT_STREAMING) {
+      const buf = this.bufferedDeltas.get(effectiveId) || [];
+      buf.push(text);
+      this.bufferedDeltas.set(effectiveId, buf);
+      // Keep a cleanup timeout to avoid unbounded memory growth
+      if (!this.bufferTimeouts.has(effectiveId)) {
+        const t = window.setTimeout(() => {
+          // If still buffered after a long time, flush to DOM as fallback
+          this.flushBufferedDeltas(effectiveId, role, effectiveId);
+        }, Math.max(this.BUFFER_WAIT_MS, 2000));
+        this.bufferTimeouts.set(effectiveId, t);
+      }
+      return;
+    }
+
+    // If previousItemId is provided and not yet seen, buffer this delta briefly
+    if (previousItemId && !this.streamingByItem.has(previousItemId) && !this.latestItemForRole[role]) {
+      // Buffer under effectiveId so we can flush it when ready
+      const buf = this.bufferedDeltas.get(effectiveId) || [];
+      buf.push(text);
+      this.bufferedDeltas.set(effectiveId, buf);
+      // Start/refresh timeout to flush eventually
+      if (this.bufferTimeouts.has(effectiveId)) {
+        clearTimeout(this.bufferTimeouts.get(effectiveId));
+      }
+      const t = window.setTimeout(() => {
+        this.flushBufferedDeltas(effectiveId, role, effectiveId /* fallback id */);
+      }, this.BUFFER_WAIT_MS);
+      this.bufferTimeouts.set(effectiveId, t);
+      return;
+    }
+
+    // If we have buffered deltas that reference this itemId (or previousItemId resolved), flush them first
+    if (this.bufferedDeltas.has(effectiveId)) {
+      const buffered = this.bufferedDeltas.get(effectiveId) || [];
+      for (const part of buffered) {
+        this.appendToStreamingItem(effectiveId, role, part);
+      }
+      this.bufferedDeltas.delete(effectiveId);
+      const to = this.bufferTimeouts.get(effectiveId);
+      if (to) { clearTimeout(to); this.bufferTimeouts.delete(effectiveId); }
+    }
+
+    // Create streaming element if not exists
+    if (!this.streamingByItem.has(effectiveId)) {
       const messageEl = document.createElement('div');
       messageEl.className = `message ${role}`;
-      messageEl.dataset.id = messageId;
+      messageEl.dataset.id = effectiveId;
 
       const bubbleEl = document.createElement('div');
       bubbleEl.className = 'message-bubble';
-      // DEBUG: Prefix with role to track where deltas go
-      bubbleEl.textContent = `${role}: ${text}`;
+      bubbleEl.textContent = text;
 
       const timeEl = document.createElement('div');
       timeEl.className = 'message-time';
-      timeEl.textContent = new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       messageEl.appendChild(bubbleEl);
       messageEl.appendChild(timeEl);
       this.chatMessages.appendChild(messageEl);
 
-      this.streamingMessages[role] = {
-        id: messageId,
-        element: messageEl
-      };
-
+      this.streamingByItem.set(effectiveId, { role, element: messageEl });
+      this.latestItemForRole[role] = effectiveId;
       this.scrollToBottom();
     } else {
-      // APPEND new text to existing streaming message for this role
-      // DEBUG: Show role on each append too
-      const bubbleEl = currentMessage.element.querySelector('.message-bubble');
-      if (bubbleEl) {
-        bubbleEl.textContent += `[${role}]${text}`;
-        this.scrollToBottom();
-      }
+      // Append to existing element
+      this.appendToStreamingItem(effectiveId, role, text);
     }
   }
 
-  /**
-   * Finalize streaming message(s) and add to messages array
-   * @param role - Optional role to finalize. If not specified, finalizes both.
-   */
-  private finalizeStreamingMessage(role?: 'user' | 'assistant'): void {
-    const rolesToFinalize = role ? [role] : (['user', 'assistant'] as const);
+  private appendToStreamingItem(id: string, role: 'user' | 'assistant', text: string) {
+    const entry = this.streamingByItem.get(id);
+    if (!entry) return;
+    const bubbleEl = entry.element.querySelector('.message-bubble');
+    if (bubbleEl) {
+      bubbleEl.textContent += text;
+      this.scrollToBottom();
+    }
+  }
 
-    for (const r of rolesToFinalize) {
-      const streamingMsg = this.streamingMessages[r];
-      if (!streamingMsg) continue;
-
-      const bubbleEl = streamingMsg.element.querySelector('.message-bubble');
-      const text = bubbleEl?.textContent || '';
-
-      if (text) {
-        // Add to messages array
-        const message: ChatMessage = {
-          id: streamingMsg.id,
+  private flushBufferedDeltas(bufferKey: string, role: 'user' | 'assistant', fallbackId: string) {
+    const parts = this.bufferedDeltas.get(bufferKey);
+    if (!parts) return;
+    // If assistant streaming is disabled, finalize buffered parts as a single message
+    if (role === 'assistant' && !this.SHOW_ASSISTANT_STREAMING) {
+      try {
+        const text = parts.join('');
+        const msg: ChatMessage = {
+          id: fallbackId,
           text,
-          sender: r,
+          sender: 'assistant',
           timestamp: Date.now(),
         };
-
-        this.messages.push(message);
-
-        // Notify widget callback
-        this.options.onMessage?.({ role: r, text });
+        this.messages.push(msg);
+        this.options.onMessage?.({ role: 'assistant', text });
+        this.renderMessage(msg);
+        const el = this.chatMessages.lastElementChild as HTMLElement | null;
+        if (el) { el.classList.add('finalized'); el.dataset.finalized = 'true'; }
+      } catch (err) {
+        log.error('Failed to finalize buffered assistant parts:', err);
       }
+    } else {
+      // create element using fallbackId
+      for (const p of parts) {
+        this.streamTranscript(p, role, fallbackId);
+      }
+    }
+    this.bufferedDeltas.delete(bufferKey);
+    const to = this.bufferTimeouts.get(bufferKey);
+    if (to) { clearTimeout(to); this.bufferTimeouts.delete(bufferKey); }
+  }
 
-      // Clear streaming state for this role
-      this.streamingMessages[r] = null;
+  private finalizeStreamingMessage(itemId?: string, role?: 'user' | 'assistant', interrupted = false): void {
+    if (itemId) {
+      const entry = this.streamingByItem.get(itemId);
+      if (entry) {
+        const bubbleEl = entry.element.querySelector('.message-bubble');
+        const text = bubbleEl?.textContent || '';
+        // Push to messages array
+        const msg: ChatMessage = {
+          id: itemId,
+          text,
+          sender: entry.role,
+          timestamp: Date.now(),
+        };
+        this.messages.push(msg);
+        this.options.onMessage?.({ role: entry.role, text });
+        // Keep the finalized bubble in the DOM (don't remove past transcript bubbles)
+        // Mark as finalized so UI/CSS can style it differently if desired
+        entry.element.classList.add('finalized');
+        entry.element.dataset.finalized = 'true';
+        this.streamingByItem.delete(itemId);
+        if (this.latestItemForRole[entry.role] === itemId) {
+          delete this.latestItemForRole[entry.role];
+        }
+        return;
+      }
+      // If we have buffered parts for this itemId (assistant streaming disabled), finalize from buffer
+      const buffered = this.bufferedDeltas.get(itemId);
+      if (buffered && buffered.length) {
+        const text = buffered.join('');
+        const msg: ChatMessage = {
+          id: itemId,
+          text,
+          sender: role || 'assistant',
+          timestamp: Date.now(),
+        };
+        this.messages.push(msg);
+        this.options.onMessage?.({ role: msg.sender as 'user' | 'assistant', text });
+        // Render finalized bubble and mark finalized
+        this.renderMessage(msg);
+        const el = this.chatMessages.lastElementChild as HTMLElement | null;
+        if (el) {
+          el.classList.add('finalized');
+          el.dataset.finalized = 'true';
+        }
+        this.bufferedDeltas.delete(itemId);
+        const to = this.bufferTimeouts.get(itemId);
+        if (to) { clearTimeout(to); this.bufferTimeouts.delete(itemId); }
+        return;
+      }
+    }
+
+    // Fallback: finalize by role if provided, else finalize both
+    const rolesToFinalize = role ? [role] : (['user','assistant'] as const);
+    for (const r of rolesToFinalize) {
+      const latestId = this.latestItemForRole[r];
+      if (!latestId) continue;
+      const entry = this.streamingByItem.get(latestId);
+      if (!entry) continue;
+      const bubbleEl = entry.element.querySelector('.message-bubble');
+      const text = bubbleEl?.textContent || '';
+      const msg: ChatMessage = {
+        id: latestId,
+        text,
+        sender: r,
+        timestamp: Date.now(),
+      };
+      this.messages.push(msg);
+      this.options.onMessage?.({ role: r, text });
+      // Keep the finalized bubble in the DOM and mark finalized
+      entry.element.classList.add('finalized');
+      entry.element.dataset.finalized = 'true';
+      this.streamingByItem.delete(latestId);
+      delete this.latestItemForRole[r];
+    }
+
+    // If no active streaming elements, check buffered deltas (useful when assistant streaming disabled)
+    if (role) {
+      // find buffered key for this role (fallback keys are role_timestamp)
+      let foundKey: string | null = null;
+      for (const k of Array.from(this.bufferedDeltas.keys())) {
+        if (k.startsWith(`${role}_`)) {
+          foundKey = k;
+          break;
+        }
+      }
+      if (foundKey) {
+        const parts = this.bufferedDeltas.get(foundKey) || [];
+        const text = parts.join('');
+        const msg: ChatMessage = {
+          id: foundKey,
+          text,
+          sender: role,
+          timestamp: Date.now(),
+        };
+        this.messages.push(msg);
+        this.options.onMessage?.({ role, text });
+        this.renderMessage(msg);
+        const el = this.chatMessages.lastElementChild as HTMLElement | null;
+        if (el) { el.classList.add('finalized'); el.dataset.finalized = 'true'; }
+        this.bufferedDeltas.delete(foundKey);
+        const to = this.bufferTimeouts.get(foundKey);
+        if (to) { clearTimeout(to); this.bufferTimeouts.delete(foundKey); }
+      }
+    }
+
+    // If interrupted, force assistant to finalize and reset state
+    if (interrupted) {
+      // ensure assistant streaming is cleared
+      const assistantId = this.latestItemForRole.assistant;
+      if (assistantId) {
+        this.finalizeStreamingMessage(assistantId, 'assistant', false);
+      }
     }
   }
 
