@@ -110,7 +110,13 @@ export class AudioOutput implements Disposable {
 
     if (!chunk) {
       // Buffer underrun - record and adjust buffer size
-      log.warn('Audio buffer underrun');
+      log.warn('Audio buffer underrun', { bufferSize: this.audioBuffer.size });
+      try {
+        const stats = this.getBufferStats();
+        log.debug('Adaptive buffer stats on underrun:', stats);
+      } catch (e) {
+        log.warn('Failed to get buffer stats on underrun', e);
+      }
       this.adaptiveBuffer.recordUnderrun();
       this.isPlaying = false;
       return;

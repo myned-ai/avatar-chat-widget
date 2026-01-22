@@ -62,6 +62,8 @@ export class SyncPlayback implements Disposable {
   
   // Blendshape tracking
   private currentFrameIndex = 0;
+  // Track last received frame index to detect gaps/duplicates
+  private lastReceivedFrameIndex: number | null = null;
   private lastBlendshapeUpdate = 0;
   private currentWeights: Record<string, number>;
   
@@ -148,6 +150,14 @@ export class SyncPlayback implements Disposable {
     if (sampleRate) {
       this.sampleRate = sampleRate;
     }
+
+    // Log sample rate vs AudioContext sample rate for diagnostics
+    try {
+      const ctx = this.audioContext;
+      log.debug('Server sampleRate:', this.sampleRate, 'AudioContext sampleRate:', ctx.sampleRate);
+    } catch (e) {
+      log.warn('Unable to read AudioContext sampleRate for diagnostics', e);
+    }
     
     // Clear buffer and reset state
     this.frameBuffer = [];
@@ -181,6 +191,17 @@ export class SyncPlayback implements Disposable {
 
     // No buffer limit - frames arrive in bursts and drain naturally via audio playback
     // Audio is the master clock - buffer size will naturally stay bounded by response duration
+    // Sequence-gap detection
+    if (typeof frame.frameIndex === 'number') {
+      if (this.lastReceivedFrameIndex !== null) {
+        const expected = this.lastReceivedFrameIndex + 1;
+        if (frame.frameIndex !== expected) {
+          log.warn('SyncPlayback frame index gap/detect:', { last: this.lastReceivedFrameIndex, got: frame.frameIndex, expected });
+        }
+      }
+      this.lastReceivedFrameIndex = frame.frameIndex;
+    }
+
     this.frameBuffer.push(frame);
 
     // Log first frame

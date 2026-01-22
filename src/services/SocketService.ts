@@ -127,6 +127,18 @@ export class SocketService extends EventEmitter implements Disposable {
       }
 
       this.emit('message', message);
+      // Lightweight diagnostics: log incoming message metadata useful for frame-skip analysis
+      try {
+        const meta: Record<string, any> = { type: message.type };
+        if ((message as any).frameIndex !== undefined) meta.frameIndex = (message as any).frameIndex;
+        if ((message as any).timestamp !== undefined) meta.timestamp = (message as any).timestamp;
+        if ((message as any).itemId !== undefined) meta.itemId = (message as any).itemId;
+        if (event.data instanceof ArrayBuffer) meta.byteLength = event.data.byteLength;
+        log.debug('Incoming message', meta);
+      } catch (e) {
+        log.warn('Failed to log incoming message meta', e);
+      }
+
       this.emit(message.type, message);
 
     } catch (error) {

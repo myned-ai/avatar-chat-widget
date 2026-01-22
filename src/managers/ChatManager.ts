@@ -55,6 +55,7 @@ export class ChatManager implements Disposable {
   private chatInput: HTMLInputElement;
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
+  private typingIndicator: HTMLElement | null = null;
 
   // State
   private isRecording = false;
@@ -108,10 +109,23 @@ export class ChatManager implements Disposable {
     this.chatInput = (options.chatInput || root.getElementById('chatInput')) as HTMLInputElement;
     this.sendBtn = (options.sendBtn || root.getElementById('sendBtn')) as HTMLButtonElement;
     this.micBtn = (options.micBtn || root.getElementById('micBtn')) as HTMLButtonElement;
+    this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement;
     
     this.setupEventListeners();
     this.setupWebSocketHandlers();
     this.startBlendshapeSync();
+  }
+
+  private setTyping(typing: boolean): void {
+    if (this.typingIndicator) {
+      if (typing) {
+        this.typingIndicator.classList.remove('hidden');
+        // Scroll to bottom when typing starts
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      } else {
+        this.typingIndicator.classList.add('hidden');
+      }
+    }
   }
 
   async initialize(): Promise<void> {
@@ -188,6 +202,7 @@ export class ChatManager implements Disposable {
     // Handle incoming messages
     this.socketService.on('text', (message: IncomingMessage) => {
       if (message.type === 'text') {
+        this.setTyping(false);
         this.addMessage(message.data, 'assistant');
       }
     });
@@ -209,6 +224,7 @@ export class ChatManager implements Disposable {
     
     this.socketService.on('audio_start', (message: IncomingMessage) => {
       if (message.type === 'audio_start') {
+        this.setTyping(false);
         log.info('Audio start received:', message.sessionId);
         this.currentSessionId = message.sessionId;
         
@@ -405,6 +421,7 @@ export class ChatManager implements Disposable {
 
     this.socketService.send(message);
     // Stay in Hello state while waiting for response
+    this.setTyping(true);
   }
 
   private async toggleVoiceInput(): Promise<void> {
@@ -477,6 +494,7 @@ export class ChatManager implements Disposable {
     this.micBtn.classList.remove('recording');
     this.micBtn.setAttribute('aria-pressed', 'false');
     // Don't change avatar state - it's controlled by server responses
+    this.setTyping(true);
   }
 
   private startBlendshapeSync(): void {
@@ -620,12 +638,16 @@ export class ChatManager implements Disposable {
       bubbleEl.className = 'message-bubble';
       bubbleEl.textContent = text;
 
+      const footerEl = document.createElement('div');
+      footerEl.className = 'message-footer';
+
       const timeEl = document.createElement('div');
       timeEl.className = 'message-time';
       timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+      footerEl.appendChild(timeEl);
       messageEl.appendChild(bubbleEl);
-      messageEl.appendChild(timeEl);
+      messageEl.appendChild(footerEl);
       this.chatMessages.appendChild(messageEl);
 
       this.streamingByItem.set(effectiveId, { role, element: messageEl });
@@ -698,6 +720,9 @@ export class ChatManager implements Disposable {
         // Mark as finalized so UI/CSS can style it differently if desired
         entry.element.classList.add('finalized');
         entry.element.dataset.finalized = 'true';
+        if (entry.role === 'assistant') {
+          this.addFeedbackButtons(entry.element);
+        }
         this.streamingByItem.delete(itemId);
         if (this.latestItemForRole[entry.role] === itemId) {
           delete this.latestItemForRole[entry.role];
@@ -750,6 +775,9 @@ export class ChatManager implements Disposable {
       // Keep the finalized bubble in the DOM and mark finalized
       entry.element.classList.add('finalized');
       entry.element.dataset.finalized = 'true';
+      if (r === 'assistant') {
+        this.addFeedbackButtons(entry.element);
+      }
       this.streamingByItem.delete(latestId);
       delete this.latestItemForRole[r];
     }
@@ -802,6 +830,10 @@ export class ChatManager implements Disposable {
     bubbleEl.className = 'message-bubble';
     bubbleEl.textContent = message.text;
     
+    const footerEl = document.createElement('div');
+    footerEl.className = 'message-footer';
+
+    // Time
     const timeEl = document.createElement('div');
     timeEl.className = 'message-time';
     timeEl.textContent = new Date(message.timestamp).toLocaleTimeString([], { 
@@ -809,9 +841,64 @@ export class ChatManager implements Disposable {
       minute: '2-digit' 
     });
     
+    footerEl.appendChild(timeEl);
     messageEl.appendChild(bubbleEl);
-    messageEl.appendChild(timeEl);
+    messageEl.appendChild(footerEl);
+
+    // Add feedback buttons for assistant
+    if (message.sender === 'assistant') {
+      this.addFeedbackButtons(messageEl);
+    }
+    
     this.chatMessages.appendChild(messageEl);
+  }
+
+  private addFeedbackButtons(messageEl: HTMLElement): void {
+    let footerEl = messageEl.querySelector('.message-footer');
+    if (!footerEl) {
+        // Fallback for older messages
+        footerEl = document.createElement('div');
+        footerEl.className = 'message-footer';
+        messageEl.appendChild(footerEl);
+    }
+
+    const feedbackContainer = document.createElement('div');
+    feedbackContainer.className = 'message-feedback';
+    
+    // Thumbs Up
+    const upBtn = document.createElement('button');
+    upBtn.className = 'feedback-btn';
+    upBtn.setAttribute('aria-label', 'Helpful');
+    upBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>`;
+    
+    // Thumbs Down
+    const downBtn = document.createElement('button');
+    downBtn.className = 'feedback-btn';
+    downBtn.setAttribute('aria-label', 'Not helpful');
+    downBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg>`;
+
+    // Click Handlers (Simple Toggle)
+    const toggleFeedback = (btn: HTMLElement, otherBtn: HTMLElement) => {
+      if (btn.classList.contains('selected')) {
+        btn.classList.remove('selected');
+      } else {
+        btn.classList.add('selected');
+        otherBtn.classList.remove('selected');
+        // Keep container visible logic can be handled via 'active' class on container if needed
+        feedbackContainer.classList.add('active'); 
+      }
+    };
+
+    upBtn.addEventListener('click', () => toggleFeedback(upBtn, downBtn));
+    downBtn.addEventListener('click', () => toggleFeedback(downBtn, upBtn));
+
+    feedbackContainer.appendChild(upBtn);
+    feedbackContainer.appendChild(downBtn);
+    
+    // Append to footer instead of message root
+    if (footerEl) {
+        footerEl.appendChild(feedbackContainer);
+    }
   }
 
   private scrollToBottom(): void {

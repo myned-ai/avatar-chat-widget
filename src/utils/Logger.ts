@@ -25,8 +25,8 @@ const isDevelopment = (): boolean => {
   return false;
 };
 
-// Default to Info in production, Debug in development
-const DEFAULT_LEVEL: LogLevelType = isDevelopment() ? LogLevel.Debug : LogLevel.Info;
+// Force Debug for diagnostics during local testing
+const DEFAULT_LEVEL: LogLevelType = LogLevel.Debug;
 
 class Logger {
   private level: LogLevelType = DEFAULT_LEVEL;

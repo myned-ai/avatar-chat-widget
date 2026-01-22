@@ -195,22 +195,35 @@ class AvatarChatElement extends HTMLElement {
 
     const container = document.createElement('div');
     container.innerHTML = BUBBLE_TEMPLATE;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Template always has bubble element
-    const bubble = container.firstElementChild!;
+    const wrapper = container.firstElementChild!;
     
-    bubble.addEventListener('click', () => this.expand());
-    bubble.addEventListener('keypress', (e) => {
-      if ((e as KeyboardEvent).key === 'Enter') this.expand();
-    });
+    // Attach events to actual bubble element
+    const bubble = wrapper.querySelector('#chatBubble');
+    if (bubble) {
+      bubble.addEventListener('click', () => this.expand());
+      bubble.addEventListener('keypress', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter') this.expand();
+      });
+    }
 
-    this.shadow.appendChild(bubble);
+    // Tooltip logic
+    const closeBtn = wrapper.querySelector('#tooltipClose');
+    const tooltip = wrapper.querySelector('#bubbleTooltip');
+    if (closeBtn && tooltip) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // prevent bubble open
+        tooltip.classList.add('hidden');
+      });
+    }
+
+    this.shadow.appendChild(wrapper);
   }
 
   /**
    * Initialize avatar renderer
    */
   private async initializeAvatar(): Promise<void> {
-    const avatarContainer = this.shadow.getElementById('avatarCircle');
+    const avatarContainer = this.shadow.getElementById('avatarContainer');
 
     if (!avatarContainer) {
       log.error('Avatar container not found');
@@ -308,6 +321,73 @@ class AvatarChatElement extends HTMLElement {
         root?.classList.toggle('theme-dark', e.matches);
       };
       this.themeMediaQuery.addEventListener('change', this.themeChangeHandler);
+    }
+
+    // Input Interaction Logic (Voice Priority)
+    const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
+    const inputControls = this.shadow.querySelector('.chat-input-controls');
+    
+    if (chatInput && inputControls) {
+      chatInput.addEventListener('input', () => {
+        if (chatInput.value.trim().length > 0) {
+          inputControls.classList.add('has-text');
+        } else {
+          inputControls.classList.remove('has-text');
+        }
+      });
+    }
+
+    // Quick Replies Logic
+    const quickReplies = this.shadow.getElementById('quickReplies');
+    const sendBtn = this.shadow.getElementById('sendBtn');
+    const micBtn = this.shadow.getElementById('micBtn');
+    
+    if (quickReplies && chatInput && sendBtn) {
+      const hideSuggestions = () => {
+        quickReplies.classList.add('hidden');
+      };
+
+      // 1. Chip Click
+      quickReplies.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains('suggestion-chip')) {
+          hideSuggestions();
+          const text = target.textContent;
+          if (text) {
+            chatInput.value = text;
+            inputControls?.classList.add('has-text'); // Show send button
+            // Trigger send with a small delay for visual feedback
+            setTimeout(() => sendBtn.click(), 200);
+          }
+        }
+      });
+
+      // 2. Hide on Send
+      sendBtn.addEventListener('click', () => {
+        hideSuggestions();
+        // Force UI cleanup after ChatManager handles send
+        setTimeout(() => {
+           if (chatInput.value.trim() === '') {
+               inputControls?.classList.remove('has-text');
+           }
+        }, 50);
+      });
+
+      // 3. Hide on Voice Start
+      micBtn?.addEventListener('click', hideSuggestions);
+
+      // 4. Hide on Enter Key
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          hideSuggestions();
+           // Force UI cleanup after ChatManager handles send
+          setTimeout(() => {
+             if (chatInput.value.trim() === '') {
+                 inputControls?.classList.remove('has-text');
+             }
+          }, 50);
+        }
+      });
     }
   }
 
