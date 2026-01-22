@@ -48,6 +48,12 @@ export interface AvatarChatConfig {
   /** Custom CSS to inject (optional) */
   customStyles?: string;
 
+  /** Quick reply suggestions shown below chat (default: built-in suggestions) */
+  suggestions?: string[];
+
+  /** Tooltip text shown on the chat bubble (default: greeting message) */
+  tooltipText?: string;
+
   /** Callback when widget is ready */
   onReady?: () => void;
 
@@ -100,4 +106,10 @@ export const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   enableText: true,
   authEnabled: false,
   logLevel: 'error',
+  suggestions: [
+    'What is your story?',
+    'What services do you provide?',
+    'Can I book a meeting?',
+  ],
+  tooltipText: 'Hi! 👋 Ask me anything.',
 };

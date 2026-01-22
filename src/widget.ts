@@ -28,6 +28,14 @@ import { LazyAvatar } from './avatar/LazyAvatar';
 import { ChatManager } from './managers/ChatManager';
 import { logger, LogLevel } from './utils/Logger';
 import { WIDGET_STYLES } from './widget/styles';
+
+/** Timing constants for UI interactions (in milliseconds) */
+const UI_DELAY = {
+  /** Visual feedback delay before triggering send action */
+  CHIP_CLICK_SEND: 200,
+  /** Delay to allow ChatManager to process before UI cleanup */
+  INPUT_CLEANUP: 50,
+} as const;
 import { WIDGET_TEMPLATE, BUBBLE_TEMPLATE } from './widget/templates';
 
 const log = logger.scope('Widget');
@@ -209,6 +217,13 @@ class AvatarChatElement extends HTMLElement {
     // Tooltip logic
     const closeBtn = wrapper.querySelector('#tooltipClose');
     const tooltip = wrapper.querySelector('#bubbleTooltip');
+    const tooltipTextEl = wrapper.querySelector('#tooltipText');
+    
+    // Set tooltip text from config
+    if (tooltipTextEl && this.config.tooltipText) {
+      tooltipTextEl.textContent = this.config.tooltipText;
+    }
+    
     if (closeBtn && tooltip) {
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // prevent bubble open
@@ -289,6 +304,8 @@ class AvatarChatElement extends HTMLElement {
         },
         onMessage: (msg) => {
           this.config.onMessage?.(msg);
+          // If we receive a message (e.g. welcome message or response), expand
+          this.expandWidgetHeight(); 
         },
         onError: (err) => {
           this.config.onError?.(err);
@@ -342,6 +359,13 @@ class AvatarChatElement extends HTMLElement {
     const sendBtn = this.shadow.getElementById('sendBtn');
     const micBtn = this.shadow.getElementById('micBtn');
     
+    // Populate suggestion chips from config
+    if (quickReplies && this.config.suggestions && this.config.suggestions.length > 0) {
+      quickReplies.innerHTML = this.config.suggestions
+        .map(text => `<button class="suggestion-chip">${this.escapeHtml(text)}</button>`)
+        .join('');
+    }
+    
     if (quickReplies && chatInput && sendBtn) {
       const hideSuggestions = () => {
         quickReplies.classList.add('hidden');
@@ -351,43 +375,68 @@ class AvatarChatElement extends HTMLElement {
       quickReplies.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         if (target.classList.contains('suggestion-chip')) {
+          this.expandWidgetHeight(); // Expand immediately
           hideSuggestions();
           const text = target.textContent;
           if (text) {
             chatInput.value = text;
             inputControls?.classList.add('has-text'); // Show send button
             // Trigger send with a small delay for visual feedback
-            setTimeout(() => sendBtn.click(), 200);
+            setTimeout(() => sendBtn.click(), UI_DELAY.CHIP_CLICK_SEND);
           }
         }
       });
 
       // 2. Hide on Send
       sendBtn.addEventListener('click', () => {
+        this.expandWidgetHeight(); // Expand immediately
         hideSuggestions();
         // Force UI cleanup after ChatManager handles send
         setTimeout(() => {
            if (chatInput.value.trim() === '') {
                inputControls?.classList.remove('has-text');
            }
-        }, 50);
+        }, UI_DELAY.INPUT_CLEANUP);
       });
 
       // 3. Hide on Voice Start
-      micBtn?.addEventListener('click', hideSuggestions);
+      micBtn?.addEventListener('click', () => {
+        this.expandWidgetHeight(); // Expand immediately
+        hideSuggestions();
+      });
 
       // 4. Hide on Enter Key
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+          this.expandWidgetHeight(); // Expand immediately
           hideSuggestions();
            // Force UI cleanup after ChatManager handles send
           setTimeout(() => {
              if (chatInput.value.trim() === '') {
                  inputControls?.classList.remove('has-text');
              }
-          }, 50);
+          }, UI_DELAY.INPUT_CLEANUP);
         }
       });
+    }
+  }
+
+  /**
+   * Escape HTML to prevent XSS in user-provided suggestions
+   */
+  private escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /**
+   * Expand the widget to full height (called on first interaction)
+   */
+  private expandWidgetHeight(): void {
+    const root = this.shadow.querySelector('.widget-root');
+    if (root && !root.classList.contains('expanded')) {
+      root.classList.add('expanded');
     }
   }
 

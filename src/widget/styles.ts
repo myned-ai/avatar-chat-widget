@@ -158,15 +158,14 @@ export const WIDGET_STYLES = `
 }
 
 .status-badge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  color: #333; /* Dark text */
-  padding: 2px 0;
-  margin-top: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-color);
+  padding: 2px 0;
+  margin-top: 2px;
   /* Add subtle shadow for readability */
   text-shadow: 0 0 8px rgba(255,255,255,0.8);
 }
@@ -244,6 +243,10 @@ export const WIDGET_STYLES = `
   background: linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 100%);
   z-index: 10; /* Above messages */
   pointer-events: none;
+}
+
+.theme-dark .chat-interface::before {
+  background: linear-gradient(to bottom, var(--bg-color) 0%, transparent 100%);
 }
 
 .chat-messages {
@@ -368,9 +371,28 @@ export const WIDGET_STYLES = `
   background: #e0e7ff;
 }
 
+.feedback-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .feedback-btn svg {
   width: 14px;
   height: 14px;
+}
+
+.theme-dark .message-feedback .feedback-btn {
+  color: #6b7280;
+}
+
+.theme-dark .message-feedback .feedback-btn:hover {
+  background: #2a2e42;
+  color: #9ca3af;
+}
+
+.theme-dark .message-feedback .feedback-btn.selected {
+  color: var(--primary-color);
+  background: rgba(75, 74, 207, 0.2);
 }
 
 .theme-dark .message.assistant .message-bubble {
@@ -391,10 +413,7 @@ export const WIDGET_STYLES = `
 
 .quick-replies.hidden {
   display: none;
-  opacity: 0;
-  pointer-events: none;
 }
-
 
 .suggestion-chip {
   background: var(--input-bg);
@@ -685,18 +704,17 @@ export const WIDGET_STYLES = `
   position: absolute;
   right: -6px;
   top: 50%;
-  transform: translateY(-50%);
   width: 12px;
   height: 12px;
   background: white;
-  transform: rotate(45deg) translateY(-8px); /* Diamond shape */
+  transform: translateY(-50%) rotate(45deg); /* Diamond shape, centered */
   border-radius: 2px;
 }
 
 .tooltip-close {
   background: none;
   border: none;
-  color: #9ca3af;
+  color: var(--text-muted, #9ca3af);
   cursor: pointer;
   font-size: 18px;
   padding: 0;
@@ -709,8 +727,8 @@ export const WIDGET_STYLES = `
   border-radius: 50%;
 }
 .tooltip-close:hover {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: var(--input-bg);
+  color: var(--text-color);
 }
 
 @keyframes tooltipSlideIn {

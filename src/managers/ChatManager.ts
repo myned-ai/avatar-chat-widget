@@ -245,6 +245,12 @@ export class ChatManager implements Disposable {
     
     this.socketService.on('audio_chunk', (message: IncomingMessage) => {
       if (message.type === 'audio_chunk') {
+        // Validate session ID to prevent stale chunks from previous conversations
+        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
+          log.debug('Ignoring audio_chunk from stale session:', message.sessionId);
+          return;
+        }
+        
         // Legacy: Server sends base64 encoded audio in JSON (without blendshapes)
         // This is used when LAM is not available
         let audioData: ArrayBuffer;
@@ -271,6 +277,12 @@ export class ChatManager implements Disposable {
     // This is the OpenAvatarChat pattern - audio and blendshapes paired together
     this.socketService.on('sync_frame', (message: IncomingMessage) => {
       if (message.type === 'sync_frame') {
+        // Validate session ID to prevent stale frames from previous conversations
+        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
+          log.debug('Ignoring sync_frame from stale session:', message.sessionId, 'current:', this.currentSessionId);
+          return;
+        }
+        
         // Mark that we're using sync playback (not legacy separate streams)
         this.useSyncPlayback = true;
         
@@ -299,6 +311,11 @@ export class ChatManager implements Disposable {
     
     this.socketService.on('blendshape', (message: IncomingMessage) => {
       if (message.type === 'blendshape') {
+        // Validate session ID to prevent stale blendshapes from previous conversations
+        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
+          return; // Silently ignore - too noisy to log every frame
+        }
+        
         // Logging reduced - see session start/end logs
         this.blendshapeBuffer.addFrame(message.weights, message.timestamp);
       }
@@ -306,6 +323,12 @@ export class ChatManager implements Disposable {
     
     this.socketService.on('audio_end', (message: IncomingMessage) => {
       if (message.type === 'audio_end') {
+        // Validate session ID to prevent stale end signals
+        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
+          log.debug('Ignoring audio_end from stale session:', message.sessionId);
+          return;
+        }
+        
         log.info('Audio end received');
         
         if (this.useSyncPlayback) {
@@ -498,8 +521,6 @@ export class ChatManager implements Disposable {
   }
 
   private startBlendshapeSync(): void {
-    let _logCounter = 0;
-    
     /**
      * Animation System Explanation:
      * 
@@ -549,8 +570,6 @@ export class ChatManager implements Disposable {
           log.debug('End of speech - body animation: Hello');
           this.avatar.setChatState('Hello');
         }
-
-        _logCounter++;
       }
       // Note: Loop continues running to stay ready for legacy mode fallback
       // Consider: Could fully stop loop when SyncPlayback is confirmed
@@ -895,10 +914,8 @@ export class ChatManager implements Disposable {
     feedbackContainer.appendChild(upBtn);
     feedbackContainer.appendChild(downBtn);
     
-    // Append to footer instead of message root
-    if (footerEl) {
-        footerEl.appendChild(feedbackContainer);
-    }
+    // Append to footer (guaranteed to exist after fallback creation above)
+    footerEl.appendChild(feedbackContainer);
   }
 
   private scrollToBottom(): void {
@@ -932,6 +949,16 @@ export class ChatManager implements Disposable {
       log.debug('Stopping recording...');
       this.stopRecording();
     }
+
+    // Stop blendshape sync loop to save CPU
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+
+    // Invalidate current session to ignore any stale messages after reconnect
+    log.debug('Invalidating session:', this.currentSessionId);
+    this.currentSessionId = null;
 
     // Stop all audio playback FIRST (before disconnect)
     log.debug('Stopping audio playback and clearing buffers...');
@@ -972,6 +999,11 @@ export class ChatManager implements Disposable {
     // Resume avatar animation - type-safe check
     if ('resume' in this.avatar && typeof this.avatar.resume === 'function') {
       (this.avatar as IAvatarController & { resume(): void }).resume();
+    }
+
+    // Restart blendshape sync loop if not already running
+    if (this.animationFrameId === null) {
+      this.startBlendshapeSync();
     }
   }
 

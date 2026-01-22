@@ -151,6 +151,11 @@ export class SyncPlayback implements Disposable {
       this.sampleRate = sampleRate;
     }
 
+    // Resume AudioContext if it was suspended (e.g., after minimize)
+    AudioContextManager.resume().catch(() => {
+      // Ignore resume errors - will be retried on user interaction
+    });
+
     // Log sample rate vs AudioContext sample rate for diagnostics
     try {
       const ctx = this.audioContext;
@@ -475,6 +480,12 @@ export class SyncPlayback implements Disposable {
       }
     }
     this.activeSourceNodes.clear();
+    
+    // Suspend AudioContext to immediately silence any remaining audio
+    // This is crucial because scheduled audio may still play even after source.stop()
+    AudioContextManager.suspend().catch(() => {
+      // Ignore suspend errors - non-critical
+    });
     
     // Return to neutral
     this.currentWeights = { ...this.neutralWeights };

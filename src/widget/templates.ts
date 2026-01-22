@@ -4,7 +4,7 @@
 
 export const WIDGET_TEMPLATE = `
 <div class="widget-root">
-  <!-- Immersive Avatar Stage (Top 55%) -->
+  <!-- Immersive Avatar Stage (Top 42%) -->
   <div class="avatar-stage" id="avatarContainer" aria-label="AI Avatar Scene">
     <!-- Header Overlay -->
     <div class="chat-header-overlay">
@@ -26,7 +26,7 @@ export const WIDGET_TEMPLATE = `
     <div class="avatar-placeholder"></div>
   </div>
 
-  <!-- Chat Interface (Bottom 45%) -->
+  <!-- Chat Interface (Bottom 58%) -->
   <div class="chat-interface">
     <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
       <!-- Messages injected here -->
@@ -41,10 +41,7 @@ export const WIDGET_TEMPLATE = `
 
     <!-- Quick Replies -->
     <div class="quick-replies" id="quickReplies">
-      <!-- Chips injected here via JS -->
-      <button class="suggestion-chip">What is your story?</button>
-      <button class="suggestion-chip">What services do you provide?</button>
-      <button class="suggestion-chip">Can I book a meeting?</button>
+      <!-- Chips injected dynamically from config.suggestions -->
     </div>
 
     <div class="chat-input-area">
@@ -80,7 +77,7 @@ export const BUBBLE_TEMPLATE = `
 <div class="bubble-container">
   <div class="bubble-tooltip-wrapper">
      <div class="bubble-tooltip" id="bubbleTooltip">
-        <span class="tooltip-text">Hi! 👋 Ask me anything about Myned AI.</span>
+        <span class="tooltip-text" id="tooltipText"></span>
         <button class="tooltip-close" id="tooltipClose" aria-label="Close tooltip">×</button>
      </div>
   </div>
