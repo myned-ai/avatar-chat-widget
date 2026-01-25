@@ -23,9 +23,14 @@ export class SocketService extends EventEmitter implements Disposable {
   private isIntentionallyClosed = false;
   private useBinaryProtocol = false; // Disable binary protocol - backend expects JSON
   private authService: AuthService;
+  private url: string;
 
-  constructor(private url: string = CONFIG.websocket.url) {
+  constructor(url?: string) {
     super();
+
+    // Read URL at construction time, but allow override
+    // This ensures we get the latest CONFIG value after setConfig() is called
+    this.url = url ?? CONFIG.websocket.url;
 
     this.authService = new AuthService();
 

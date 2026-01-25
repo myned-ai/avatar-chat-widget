@@ -201,15 +201,15 @@ export function resetConfig(): void {
  * Proxies to runtimeConfig for seamless migration
  * Read-only with proper validation
  */
-export const CONFIG: Readonly<AppConfig> = new Proxy(runtimeConfig, {
-  get(target, prop: string | symbol) {
-    // Only allow string properties that exist in AppConfig
-    if (typeof prop === 'string' && prop in target) {
-      return target[prop as keyof AppConfig];
+export const CONFIG: Readonly<AppConfig> = new Proxy({} as AppConfig, {
+  get(_target, prop: string | symbol) {
+    // Always read from current runtimeConfig (not the original target)
+    if (typeof prop === 'string' && prop in runtimeConfig) {
+      return runtimeConfig[prop as keyof AppConfig];
     }
     // Handle Symbol properties (for iterators, etc.)
     if (typeof prop === 'symbol') {
-      return (target as unknown as Record<symbol, unknown>)[prop];
+      return (runtimeConfig as unknown as Record<symbol, unknown>)[prop];
     }
     throw new Error(`Invalid config property: ${String(prop)}`);
   },
