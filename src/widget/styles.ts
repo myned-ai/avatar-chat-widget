@@ -19,7 +19,7 @@ export const WIDGET_STYLES = `
   --text-color: #333;
   --input-bg: #f5f5f7;
   --border-color: #e0e0e0;
-  --avatar-stage-height: 42%;
+  --avatar-stage-height: 50%;
 }
 
 :host * {
@@ -37,7 +37,7 @@ export const WIDGET_STYLES = `
 /* Main container */
 .widget-root {
   width: 350px;
-  height: 540px; /* Taller for immersive view */
+  height: auto; /* Auto height based on content */
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -47,7 +47,9 @@ export const WIDGET_STYLES = `
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   transition: transform 0.3s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease;
-  position: relative;
+  position: absolute;
+  bottom: 0; /* Anchor to bottom so expansion goes upward */
+  right: 0;
   border: 1px solid rgba(0,0,0,0.08);
 }
 
@@ -80,7 +82,7 @@ export const WIDGET_STYLES = `
    Avatar Stage (Top Half)
    ========================================================================== */
 .avatar-stage {
-  height: var(--avatar-stage-height);
+  height: 240px; /* Fixed height for avatar section */
   position: relative;
   background: radial-gradient(circle at center 40%, #f0f4ff 0%, #ffffff 80%);
   overflow: hidden;
@@ -96,8 +98,8 @@ export const WIDGET_STYLES = `
   width: 800px;
   height: 800px;
   position: absolute;
-  /* Reduced from -280px to -160px because scale is smaller */
-  bottom: -200px;
+  /* Adjusted to center avatar in its section */
+  bottom: -160px;
   left: 50%;
   transform: translateX(-50%) scale(0.70);
   transform-origin: center bottom;
@@ -217,7 +219,7 @@ export const WIDGET_STYLES = `
    Chat Interface (Bottom Half)
    ========================================================================== */
 .chat-interface {
-  flex: 1;
+  flex-shrink: 0; /* Don't shrink */
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.95); /* Slightly translucent */
@@ -229,7 +231,19 @@ export const WIDGET_STYLES = `
   margin-top: 0;
   border-top: 1px solid rgba(0,0,0,0.05); /* Clean straight separation */
   overflow: hidden; /* Added to constrain child elements */
-  min-height: 0; /* Added to ensure flex container can shrink if needed */
+}
+
+/* Container for messages and quick-replies - they stack in same space */
+.chat-content-area {
+  position: relative;
+  height: 130px; /* Compact height for suggestions */
+  flex-shrink: 0;
+  transition: height 0.2s ease;
+}
+
+/* Expanded state - more room for conversation */
+.widget-root.expanded .chat-content-area {
+  height: 220px; /* ~25% more space for messages */
 }
 
 /* Fade overlay at the top of chat interface */
@@ -250,18 +264,31 @@ export const WIDGET_STYLES = `
 }
 
 .chat-messages {
-  flex: 1;
-  /* Ensure min-height is 0 so flex scrolling works properly */
-  min-height: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20px;
   overflow-y: auto;
-  /* Added top specific padding to account for the fade overlay */
-  padding: 24px 20px 20px; 
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: block;
   /* Scrollbar styling */
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.1) transparent;
+  opacity: 0; /* Hidden initially */
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+/* Messages container for flex layout */
+.chat-messages .message {
+  margin-bottom: 12px;
+}
+
+/* Show chat messages when conversation starts */
+.widget-root.expanded .chat-messages {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-messages::-webkit-scrollbar {
@@ -402,17 +429,23 @@ export const WIDGET_STYLES = `
 
 /* Quick Replies */
 .quick-replies {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
-  flex-direction: column; /* Vertical layout */
+  flex-direction: column;
+  justify-content: center; /* Center vertically */
   align-items: flex-end; /* Align to right like user bubbles */
-  gap: 14px; /* Increased gap to spread them out */
-  /* Increased vertical padding to use more empty chat space */
-  padding: 20px 16px 16px;
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  gap: 10px;
+  padding: 12px 16px;
+  transition: opacity 0.2s ease;
 }
 
 .quick-replies.hidden {
-  display: none;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .suggestion-chip {
@@ -478,6 +511,7 @@ export const WIDGET_STYLES = `
   padding: 16px;
   background: var(--bg-color);
   border-top: 1px solid var(--border-color);
+  flex-shrink: 0; /* Prevent input from being compressed */
 }
 
 .chat-input-wrapper {

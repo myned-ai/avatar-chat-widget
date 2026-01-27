@@ -28,20 +28,23 @@ export const WIDGET_TEMPLATE = `
 
   <!-- Chat Interface (Bottom 58%) -->
   <div class="chat-interface">
-    <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
-      <!-- Messages injected here -->
-      <div id="typingIndicator" class="message assistant typing-indicator hidden">
-        <div class="message-bubble">
-           <div class="typing-dots">
-             <span></span><span></span><span></span>
-           </div>
+    <!-- Content area: messages and quick-replies stack in same space -->
+    <div class="chat-content-area">
+      <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
+        <!-- Messages injected here -->
+        <div id="typingIndicator" class="message assistant typing-indicator hidden">
+          <div class="message-bubble">
+             <div class="typing-dots">
+               <span></span><span></span><span></span>
+             </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Quick Replies -->
-    <div class="quick-replies" id="quickReplies">
-      <!-- Chips injected dynamically from config.suggestions -->
+      <!-- Quick Replies -->
+      <div class="quick-replies" id="quickReplies">
+        <!-- Chips injected dynamically from config.suggestions -->
+      </div>
     </div>
 
     <div class="chat-input-area">

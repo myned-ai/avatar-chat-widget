@@ -111,9 +111,27 @@ export class ChatManager implements Disposable {
     this.micBtn = (options.micBtn || root.getElementById('micBtn')) as HTMLButtonElement;
     this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement;
     
+    // Setup MutationObserver to auto-scroll when content changes
+    this.setupAutoScroll();
+    
     this.setupEventListeners();
     this.setupWebSocketHandlers();
     this.startBlendshapeSync();
+  }
+
+  private setupAutoScroll(): void {
+    const observer = new MutationObserver(() => {
+      // Scroll to bottom whenever content changes
+      if (this.chatMessages) {
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      }
+    });
+    
+    observer.observe(this.chatMessages, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
   }
 
   private setTyping(typing: boolean): void {
@@ -919,7 +937,17 @@ export class ChatManager implements Disposable {
   }
 
   private scrollToBottom(): void {
-    this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    // Scroll after content has rendered - multiple attempts with increasing delays
+    const doScroll = () => {
+      if (this.chatMessages) {
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+      }
+    };
+    
+    // Multiple delayed attempts to catch late renders
+    setTimeout(doScroll, 50);
+    setTimeout(doScroll, 200);
+    setTimeout(doScroll, 500);
   }
 
   private toggleChat(): void {
