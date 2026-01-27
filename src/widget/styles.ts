@@ -479,9 +479,20 @@ export const WIDGET_STYLES = `
   color: white;
 }
 
-/* Typing Indicator */
-.typing-indicator.hidden {
-  display: none;
+/* Typing Indicator - positioned at bottom of chat area */
+.typing-indicator {
+  display: none; /* Hidden by default */
+  position: absolute;
+  bottom: 8px;
+  left: 20px;
+  background: var(--assistant-bubble);
+  border-radius: 16px;
+  padding: 8px 12px;
+  z-index: 5;
+}
+
+.typing-indicator.visible {
+  display: flex; /* Only show when visible class is added */
 }
 
 .typing-dots {

@@ -32,12 +32,11 @@ export const WIDGET_TEMPLATE = `
     <div class="chat-content-area">
       <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
         <!-- Messages injected here -->
-        <div id="typingIndicator" class="message assistant typing-indicator hidden">
-          <div class="message-bubble">
-             <div class="typing-dots">
-               <span></span><span></span><span></span>
-             </div>
-          </div>
+      </div>
+      <!-- Typing indicator at bottom of chat area -->
+      <div id="typingIndicator" class="typing-indicator">
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
         </div>
       </div>
 

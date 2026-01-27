@@ -56,6 +56,8 @@ export class ChatManager implements Disposable {
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
   private typingIndicator: HTMLElement | null = null;
+  private typingStartTime: number = 0;
+  private readonly MIN_TYPING_DISPLAY_MS = 1500; // Minimum time to show typing indicator
 
   // State
   private isRecording = false;
@@ -137,11 +139,23 @@ export class ChatManager implements Disposable {
   private setTyping(typing: boolean): void {
     if (this.typingIndicator) {
       if (typing) {
-        this.typingIndicator.classList.remove('hidden');
+        this.typingStartTime = Date.now();
+        this.typingIndicator.classList.add('visible');
         // Scroll to bottom when typing starts
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
       } else {
-        this.typingIndicator.classList.add('hidden');
+        // Ensure minimum display time before hiding
+        const elapsed = Date.now() - this.typingStartTime;
+        const remaining = this.MIN_TYPING_DISPLAY_MS - elapsed;
+        
+        if (remaining > 0) {
+          // Delay hiding until minimum time has passed
+          setTimeout(() => {
+            this.typingIndicator?.classList.remove('visible');
+          }, remaining);
+        } else {
+          this.typingIndicator.classList.remove('visible');
+        }
       }
     }
   }
@@ -535,7 +549,7 @@ export class ChatManager implements Disposable {
     this.micBtn.classList.remove('recording');
     this.micBtn.setAttribute('aria-pressed', 'false');
     // Don't change avatar state - it's controlled by server responses
-    this.setTyping(true);
+    // Note: No typing indicator for voice - only for text input
   }
 
   private startBlendshapeSync(): void {
