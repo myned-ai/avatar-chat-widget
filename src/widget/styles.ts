@@ -11,19 +11,23 @@
  */
 
 export const WIDGET_STYLES = `
+/* Import Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap');
+
 /* Reset all inherited styles */
 :host {
   all: initial;
   display: block;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  font-size: 14px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
   line-height: 1.5;
-  color: #333;
+  color: #1F2937;
   box-sizing: border-box;
   --primary-color: #4B4ACF;
   --primary-gradient: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
   --bg-color: #ffffff;
-  --text-color: #333;
+  --text-color: #1F2937;
   --input-bg: #f5f5f7;
   --border-color: #e0e0e0;
   /* Heights - split-view: avatar 280px (includes 56px behind header), chat 170px */
@@ -218,6 +222,7 @@ export const WIDGET_STYLES = `
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
+  font-weight: 500;
 }
 
 .control-btn svg {
@@ -484,10 +489,10 @@ export const WIDGET_STYLES = `
   padding: 6px 12px;
   border-radius: 16px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   flex-shrink: 0;
-  font-weight: 500;
 }
 
 .suggestion-chip:hover {
@@ -602,7 +607,8 @@ export const WIDGET_STYLES = `
 .message-bubble {
   padding: 10px 16px;
   border-radius: 18px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 400;
   line-height: 1.5;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
@@ -724,6 +730,7 @@ export const WIDGET_STYLES = `
   padding: 8px;
   border-radius: 50%;
   transition: all 0.2s;
+  font-weight: 500;
 }
 
 .input-button:hover {
