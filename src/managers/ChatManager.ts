@@ -78,6 +78,14 @@ export class ChatManager implements Disposable {
   // Control whether assistant transcript is shown incrementally or only on finalize
   // Set to `false` to show assistant text as a whole when completed
   private readonly SHOW_ASSISTANT_STREAMING = false;
+  // Single buffer key for all assistant deltas in a turn (so they share one bubble)
+  private readonly ASSISTANT_TURN_KEY = 'assistant_current_turn';
+  // Interval for appending buffered content to bubble
+  private assistantAppendInterval: number | null = null;
+  private readonly ASSISTANT_APPEND_INTERVAL_MS = 500; // Append every 0.5 seconds
+  // Current assistant turn element - append all parts to same bubble
+  private currentAssistantTurnElement: HTMLElement | null = null;
+  private currentAssistantTurnText: string = '';
   
   // Options & Callbacks
   private options: ChatManagerOptions;
@@ -231,11 +239,13 @@ export class ChatManager implements Disposable {
       log.debug('Connection state:', state);
     });
     
-    // Handle incoming messages
+    // Handle incoming messages (legacy - now using transcript_done for assistant)
     this.socketService.on('text', (message: IncomingMessage) => {
       if (message.type === 'text') {
         this.setTyping(false);
-        this.addMessage(message.data, 'assistant');
+        // Skip assistant text messages - we use transcript_done for those now
+        // This prevents duplicate bubbles
+        log.debug('Ignoring text message (using transcript instead):', message.data?.substring(0, 50));
       }
     });
     
@@ -363,6 +373,9 @@ export class ChatManager implements Disposable {
         
         log.info('Audio end received');
         
+        // Finalize assistant turn bubble
+        this.finalizeAssistantTurn();
+        
         if (this.useSyncPlayback) {
           // Using synchronized playback - it will handle ending naturally
           this.syncPlayback.endSession(message.sessionId);
@@ -388,6 +401,9 @@ export class ChatManager implements Disposable {
         this.syncPlayback.stop();
         this.audioOutput.stop();
         this.blendshapeBuffer.clear();
+
+        // Finalize assistant turn bubble (whatever was said so far)
+        this.finalizeAssistantTurn();
 
         // Finalize specific item if provided, else finalize assistant fallback
         const interruptedItem = (message as any).itemId as string | undefined;
@@ -418,7 +434,13 @@ export class ChatManager implements Disposable {
         const role = message.role === 'assistant' ? 'assistant' : 'user';
         const itemId = (message as any).itemId as string | undefined;
         const interrupted = !!(message as any).interrupted;
-        this.finalizeStreamingMessage(itemId, role, interrupted);
+        
+        if (role === 'assistant') {
+          // Just finalize the turn - don't append text since deltas already contain it
+          this.finalizeAssistantTurn();
+        } else {
+          this.finalizeStreamingMessage(itemId, role, interrupted);
+        }
       }
     });
     
@@ -612,7 +634,125 @@ export class ChatManager implements Disposable {
     sync();
   }
 
+  /**
+   * Append text to the current assistant turn bubble (or create one)
+   */
+  private appendToAssistantTurn(text: string): void {
+    if (!text || !text.trim()) return;
+
+    // Create bubble if doesn't exist
+    if (!this.currentAssistantTurnElement) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message assistant';
+      messageEl.dataset.id = `assistant_turn_${Date.now()}`;
+
+      const bubbleEl = document.createElement('div');
+      bubbleEl.className = 'message-bubble';
+      bubbleEl.textContent = text;
+
+      const footerEl = document.createElement('div');
+      footerEl.className = 'message-footer';
+
+      messageEl.appendChild(bubbleEl);
+      messageEl.appendChild(footerEl);
+      this.chatMessages.appendChild(messageEl);
+
+      this.currentAssistantTurnElement = messageEl;
+      this.currentAssistantTurnText = text;
+      this.scrollToBottom();
+    } else {
+      // Append to existing bubble
+      const bubbleEl = this.currentAssistantTurnElement.querySelector('.message-bubble');
+      if (bubbleEl) {
+        this.currentAssistantTurnText += ' ' + text;
+        bubbleEl.textContent = this.currentAssistantTurnText;
+        this.scrollToBottom();
+      }
+    }
+  }
+
+  /**
+   * Append buffered deltas to the assistant bubble (called every second)
+   */
+  private appendBufferedToAssistantBubble(): void {
+    const buffered = this.bufferedDeltas.get(this.ASSISTANT_TURN_KEY);
+    if (!buffered || buffered.length === 0) return;
+
+    // Take all buffered text and clear the buffer
+    const text = buffered.join('');
+    this.bufferedDeltas.set(this.ASSISTANT_TURN_KEY, []);
+
+    // Create or append to the bubble
+    if (!this.currentAssistantTurnElement) {
+      // Create new bubble
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message assistant';
+      messageEl.dataset.id = `assistant_turn_${Date.now()}`;
+
+      const bubbleEl = document.createElement('div');
+      bubbleEl.className = 'message-bubble';
+      bubbleEl.textContent = text;
+
+      const footerEl = document.createElement('div');
+      footerEl.className = 'message-footer';
+
+      messageEl.appendChild(bubbleEl);
+      messageEl.appendChild(footerEl);
+      this.chatMessages.appendChild(messageEl);
+
+      this.currentAssistantTurnElement = messageEl;
+      this.currentAssistantTurnText = text;
+      this.scrollToBottom();
+    } else {
+      // Append to existing bubble
+      const bubbleEl = this.currentAssistantTurnElement.querySelector('.message-bubble');
+      if (bubbleEl) {
+        this.currentAssistantTurnText += text;
+        bubbleEl.textContent = this.currentAssistantTurnText;
+        this.scrollToBottom();
+      }
+    }
+  }
+
+  /**
+   * Finalize the current assistant turn (call when turn is complete)
+   */
+  public finalizeAssistantTurn(): void {
+    // Stop the append interval
+    if (this.assistantAppendInterval) {
+      clearInterval(this.assistantAppendInterval);
+      this.assistantAppendInterval = null;
+    }
+
+    // Flush any remaining buffered content
+    this.appendBufferedToAssistantBubble();
+    this.bufferedDeltas.delete(this.ASSISTANT_TURN_KEY);
+
+    if (!this.currentAssistantTurnElement) return;
+
+    const msg: ChatMessage = {
+      id: this.currentAssistantTurnElement.dataset.id || `assistant_${Date.now()}`,
+      text: this.currentAssistantTurnText,
+      sender: 'assistant',
+      timestamp: Date.now(),
+    };
+    this.messages.push(msg);
+    this.options.onMessage?.({ role: 'assistant', text: this.currentAssistantTurnText });
+
+    this.currentAssistantTurnElement.classList.add('finalized');
+    this.currentAssistantTurnElement.dataset.finalized = 'true';
+
+    // Reset for next turn
+    this.currentAssistantTurnElement = null;
+    this.currentAssistantTurnText = '';
+  }
+
   private addMessage(text: string, sender: 'user' | 'assistant'): void {
+    // If user is sending a new message, finalize any previous assistant turn
+    if (sender === 'user' && this.currentAssistantTurnElement) {
+      this.finalizeAssistantTurn();
+    }
+
     const message: ChatMessage = {
       id: Date.now().toString(),
       text,
@@ -632,21 +772,27 @@ export class ChatManager implements Disposable {
    * Item-aware streaming transcript: uses server-provided itemId and previousItemId
    */
   private streamTranscript(text: string, role: 'user' | 'assistant', itemId?: string, previousItemId?: string): void {
+    // If user is starting to speak, finalize any previous assistant turn
+    if (role === 'user' && this.currentAssistantTurnElement) {
+      this.finalizeAssistantTurn();
+    }
+
     // Determine effective id
     const effectiveId = itemId || `${role}_${Date.now().toString()}`;
 
     // If assistant streaming is disabled, just buffer the parts and return
+    // Use a single key for ALL assistant deltas so they merge into one bubble
     if (role === 'assistant' && !this.SHOW_ASSISTANT_STREAMING) {
-      const buf = this.bufferedDeltas.get(effectiveId) || [];
+      const bufferKey = this.ASSISTANT_TURN_KEY; // Single key for entire turn
+      const buf = this.bufferedDeltas.get(bufferKey) || [];
       buf.push(text);
-      this.bufferedDeltas.set(effectiveId, buf);
-      // Keep a cleanup timeout to avoid unbounded memory growth
-      if (!this.bufferTimeouts.has(effectiveId)) {
-        const t = window.setTimeout(() => {
-          // If still buffered after a long time, flush to DOM as fallback
-          this.flushBufferedDeltas(effectiveId, role, effectiveId);
-        }, Math.max(this.BUFFER_WAIT_MS, 2000));
-        this.bufferTimeouts.set(effectiveId, t);
+      this.bufferedDeltas.set(bufferKey, buf);
+      
+      // Start interval to append buffered content every second
+      if (!this.assistantAppendInterval) {
+        this.assistantAppendInterval = window.setInterval(() => {
+          this.appendBufferedToAssistantBubble();
+        }, this.ASSISTANT_APPEND_INTERVAL_MS);
       }
       return;
     }
@@ -692,11 +838,6 @@ export class ChatManager implements Disposable {
       const footerEl = document.createElement('div');
       footerEl.className = 'message-footer';
 
-      const timeEl = document.createElement('div');
-      timeEl.className = 'message-time';
-      timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-      footerEl.appendChild(timeEl);
       messageEl.appendChild(bubbleEl);
       messageEl.appendChild(footerEl);
       this.chatMessages.appendChild(messageEl);
@@ -753,6 +894,38 @@ export class ChatManager implements Disposable {
   }
 
   private finalizeStreamingMessage(itemId?: string, role?: 'user' | 'assistant', interrupted = false): void {
+    // If this is for assistant and we have a current turn element, skip (already handled)
+    if (role === 'assistant' && this.currentAssistantTurnElement) {
+      log.debug('Skipping finalizeStreamingMessage - assistant turn already handled');
+      return;
+    }
+    
+    // For assistant, check the unified turn buffer first
+    if (role === 'assistant') {
+      const buffered = this.bufferedDeltas.get(this.ASSISTANT_TURN_KEY);
+      if (buffered && buffered.length) {
+        const text = buffered.join(' ');
+        const msg: ChatMessage = {
+          id: `assistant_turn_${Date.now()}`,
+          text,
+          sender: 'assistant',
+          timestamp: Date.now(),
+        };
+        this.messages.push(msg);
+        this.options.onMessage?.({ role: 'assistant', text });
+        this.renderMessage(msg);
+        const el = this.chatMessages.lastElementChild as HTMLElement | null;
+        if (el) {
+          el.classList.add('finalized');
+          el.dataset.finalized = 'true';
+        }
+        this.bufferedDeltas.delete(this.ASSISTANT_TURN_KEY);
+        const to = this.bufferTimeouts.get(this.ASSISTANT_TURN_KEY);
+        if (to) { clearTimeout(to); this.bufferTimeouts.delete(this.ASSISTANT_TURN_KEY); }
+        return;
+      }
+    }
+    
     if (itemId) {
       const entry = this.streamingByItem.get(itemId);
       if (entry) {
@@ -771,9 +944,6 @@ export class ChatManager implements Disposable {
         // Mark as finalized so UI/CSS can style it differently if desired
         entry.element.classList.add('finalized');
         entry.element.dataset.finalized = 'true';
-        if (entry.role === 'assistant') {
-          this.addFeedbackButtons(entry.element);
-        }
         this.streamingByItem.delete(itemId);
         if (this.latestItemForRole[entry.role] === itemId) {
           delete this.latestItemForRole[entry.role];
@@ -826,9 +996,6 @@ export class ChatManager implements Disposable {
       // Keep the finalized bubble in the DOM and mark finalized
       entry.element.classList.add('finalized');
       entry.element.dataset.finalized = 'true';
-      if (r === 'assistant') {
-        this.addFeedbackButtons(entry.element);
-      }
       this.streamingByItem.delete(latestId);
       delete this.latestItemForRole[r];
     }
@@ -884,70 +1051,10 @@ export class ChatManager implements Disposable {
     const footerEl = document.createElement('div');
     footerEl.className = 'message-footer';
 
-    // Time
-    const timeEl = document.createElement('div');
-    timeEl.className = 'message-time';
-    timeEl.textContent = new Date(message.timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-    
-    footerEl.appendChild(timeEl);
     messageEl.appendChild(bubbleEl);
     messageEl.appendChild(footerEl);
 
-    // Add feedback buttons for assistant
-    if (message.sender === 'assistant') {
-      this.addFeedbackButtons(messageEl);
-    }
-    
     this.chatMessages.appendChild(messageEl);
-  }
-
-  private addFeedbackButtons(messageEl: HTMLElement): void {
-    let footerEl = messageEl.querySelector('.message-footer');
-    if (!footerEl) {
-        // Fallback for older messages
-        footerEl = document.createElement('div');
-        footerEl.className = 'message-footer';
-        messageEl.appendChild(footerEl);
-    }
-
-    const feedbackContainer = document.createElement('div');
-    feedbackContainer.className = 'message-feedback';
-    
-    // Thumbs Up
-    const upBtn = document.createElement('button');
-    upBtn.className = 'feedback-btn';
-    upBtn.setAttribute('aria-label', 'Helpful');
-    upBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>`;
-    
-    // Thumbs Down
-    const downBtn = document.createElement('button');
-    downBtn.className = 'feedback-btn';
-    downBtn.setAttribute('aria-label', 'Not helpful');
-    downBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg>`;
-
-    // Click Handlers (Simple Toggle)
-    const toggleFeedback = (btn: HTMLElement, otherBtn: HTMLElement) => {
-      if (btn.classList.contains('selected')) {
-        btn.classList.remove('selected');
-      } else {
-        btn.classList.add('selected');
-        otherBtn.classList.remove('selected');
-        // Keep container visible logic can be handled via 'active' class on container if needed
-        feedbackContainer.classList.add('active'); 
-      }
-    };
-
-    upBtn.addEventListener('click', () => toggleFeedback(upBtn, downBtn));
-    downBtn.addEventListener('click', () => toggleFeedback(downBtn, upBtn));
-
-    feedbackContainer.appendChild(upBtn);
-    feedbackContainer.appendChild(downBtn);
-    
-    // Append to footer (guaranteed to exist after fallback creation above)
-    footerEl.appendChild(feedbackContainer);
   }
 
   private scrollToBottom(): void {

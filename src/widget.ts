@@ -28,6 +28,7 @@ import { LazyAvatar } from './avatar/LazyAvatar';
 import { ChatManager } from './managers/ChatManager';
 import { logger, LogLevel } from './utils/Logger';
 import { WIDGET_STYLES } from './widget/styles';
+import { DrawerController, type DrawerState } from './widget/DrawerController';
 
 /** Timing constants for UI interactions (in milliseconds) */
 const UI_DELAY = {
@@ -76,6 +77,7 @@ class AvatarChatElement extends HTMLElement {
   private config!: AvatarChatConfig;
   private avatar: InstanceType<typeof LazyAvatar> | null = null;
   private chatManager: ChatManager | null = null;
+  private drawerController: DrawerController | null = null;
   private _isMounted = false;
   private _isConnected = false;
   private _isCollapsed = false;
@@ -172,6 +174,9 @@ class AvatarChatElement extends HTMLElement {
     }
 
     this.shadow.appendChild(root);
+
+    // Initialize drawer controller for sliding sheet
+    this.initializeDrawer();
 
     // Setup UI event listeners
     this.setupUIEvents();
@@ -304,8 +309,8 @@ class AvatarChatElement extends HTMLElement {
         },
         onMessage: (msg) => {
           this.config.onMessage?.(msg);
-          // If we receive a message (e.g. welcome message or response), expand
-          this.expandWidgetHeight(); 
+          // If we receive a message (e.g. welcome message or response), mark has messages
+          this.markHasMessages(); 
         },
         onError: (err) => {
           this.config.onError?.(err);
@@ -375,7 +380,7 @@ class AvatarChatElement extends HTMLElement {
       quickReplies.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         if (target.classList.contains('suggestion-chip')) {
-          this.expandWidgetHeight(); // Expand immediately
+          this.markHasMessages(); // Mark has messages immediately
           hideSuggestions();
           const text = target.textContent;
           if (text) {
@@ -389,7 +394,7 @@ class AvatarChatElement extends HTMLElement {
 
       // 2. Hide on Send
       sendBtn.addEventListener('click', () => {
-        this.expandWidgetHeight(); // Expand immediately
+        this.markHasMessages(); // Mark has messages immediately
         hideSuggestions();
         // Force UI cleanup after ChatManager handles send
         setTimeout(() => {
@@ -401,14 +406,14 @@ class AvatarChatElement extends HTMLElement {
 
       // 3. Hide on Voice Start
       micBtn?.addEventListener('click', () => {
-        this.expandWidgetHeight(); // Expand immediately
+        this.markHasMessages(); // Mark has messages immediately
         hideSuggestions();
       });
 
       // 4. Hide on Enter Key
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-          this.expandWidgetHeight(); // Expand immediately
+          this.markHasMessages(); // Mark has messages immediately
           hideSuggestions();
            // Force UI cleanup after ChatManager handles send
           setTimeout(() => {
@@ -431,13 +436,120 @@ class AvatarChatElement extends HTMLElement {
   }
 
   /**
-   * Expand the widget to full height (called on first interaction)
+   * Mark that conversation has messages (shows chat area instead of suggestions)
    */
-  private expandWidgetHeight(): void {
+  private markHasMessages(): void {
     const root = this.shadow.querySelector('.widget-root');
-    if (root && !root.classList.contains('expanded')) {
-      root.classList.add('expanded');
+    if (root && !root.classList.contains('has-messages')) {
+      root.classList.add('has-messages');
     }
+  }
+
+  /**
+   * Initialize the drawer controller and view mode selector
+   */
+  private initializeDrawer(): void {
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+    const avatarSection = this.shadow.getElementById('avatarSection') as HTMLElement;
+    const chatSection = this.shadow.getElementById('chatSection') as HTMLElement;
+
+    if (!widgetRoot || !avatarSection || !chatSection) {
+      log.warn('Drawer elements not found');
+      return;
+    }
+
+    this.drawerController = new DrawerController({
+      widgetRoot,
+      avatarSection,
+      chatSection,
+      onStateChange: (state: DrawerState) => {
+        log.debug('Drawer state changed:', state);
+        this.updateViewModeUI(state);
+      },
+    });
+
+    // Setup view mode selector
+    this.setupViewModeSelector();
+    
+    // Setup expand button
+    this.setupExpandButton();
+  }
+
+  /**
+   * Setup expand button for text-focus mode
+   */
+  private setupExpandButton(): void {
+    const expandBtn = this.shadow.getElementById('expandBtn') as HTMLButtonElement;
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+
+    if (!expandBtn || !widgetRoot) {
+      log.warn('Expand button elements not found');
+      return;
+    }
+
+    expandBtn.addEventListener('click', () => {
+      const isExpanded = widgetRoot.classList.toggle('expanded');
+      expandBtn.setAttribute('aria-label', isExpanded ? 'Collapse chat' : 'Expand chat');
+      expandBtn.setAttribute('title', isExpanded ? 'Collapse' : 'Expand');
+    });
+  }
+
+  /**
+   * Setup view mode dropdown button and options
+   */
+  private setupViewModeSelector(): void {
+    const viewModeBtn = this.shadow.getElementById('viewModeBtn') as HTMLButtonElement;
+    const dropdown = this.shadow.getElementById('viewModeDropdown') as HTMLElement;
+    const options = this.shadow.querySelectorAll('.view-mode-option') as NodeListOf<HTMLButtonElement>;
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+    const expandBtn = this.shadow.getElementById('expandBtn') as HTMLButtonElement;
+
+    if (!viewModeBtn || !dropdown) {
+      log.warn('View mode elements not found');
+      return;
+    }
+
+    // Toggle dropdown on button click
+    viewModeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = dropdown.classList.toggle('open');
+      viewModeBtn.setAttribute('aria-expanded', String(isOpen));
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', () => {
+      dropdown.classList.remove('open');
+      viewModeBtn.setAttribute('aria-expanded', 'false');
+    });
+
+    // Handle option selection
+    options.forEach((option) => {
+      option.addEventListener('click', () => {
+        const mode = option.dataset.mode as DrawerState;
+        if (mode && this.drawerController) {
+          // Remove expanded state when switching to avatar-focus (avatar mode shouldn't expand)
+          if (mode === 'avatar-focus') {
+            widgetRoot.classList.remove('expanded');
+            expandBtn.setAttribute('aria-label', 'Expand chat');
+            expandBtn.setAttribute('title', 'Expand');
+          }
+          this.drawerController.setState(mode);
+        }
+        dropdown.classList.remove('open');
+        viewModeBtn.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
+  /**
+   * Update view mode UI to reflect current state
+   */
+  private updateViewModeUI(state: DrawerState): void {
+    const options = this.shadow.querySelectorAll('.view-mode-option') as NodeListOf<HTMLButtonElement>;
+    options.forEach((option) => {
+      const isActive = option.dataset.mode === state;
+      option.classList.toggle('active', isActive);
+    });
   }
 
   /**
@@ -571,6 +683,12 @@ class AvatarChatElement extends HTMLElement {
       this.themeMediaQuery.removeEventListener('change', this.themeChangeHandler);
       this.themeMediaQuery = null;
       this.themeChangeHandler = null;
+    }
+
+    // Cleanup drawer controller event listeners
+    if (this.drawerController) {
+      this.drawerController.destroy();
+      this.drawerController = null;
     }
 
     if (this.chatManager) {
