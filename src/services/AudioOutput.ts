@@ -20,6 +20,7 @@ export class AudioOutput implements Disposable {
   private sessionId: string | null = null;
   private sampleRate: number = CONFIG.audio.output.sampleRate;
   private isStopped = false;
+  private lastDropLogTime = 0;
   private readonly chunkDurationMs = 100; // 2400 samples at 24kHz = 100ms
 
   constructor() {
@@ -50,11 +51,24 @@ export class AudioOutput implements Disposable {
     this.audioBuffer.clear();
     this.isPlaying = false;
     this.nextPlayTime = 0;
+    // Ensure AudioContext is running after an interrupt or page minimize
+    AudioContextManager.resume().catch(() => {
+      // Ignore resume errors - will retry on user interaction
+    });
   }
 
   addAudioChunk(data: ArrayBuffer, timestamp: number): void {
     // Ignore incoming audio if stopped
     if (this.isStopped) {
+      const now = Date.now();
+      if (now - this.lastDropLogTime > 1000) {
+        this.lastDropLogTime = now;
+        log.debug('Dropping audio chunk while stopped', {
+          bytes: data.byteLength,
+          timestamp,
+          sessionId: this.sessionId,
+        });
+      }
       return;
     }
 
@@ -152,6 +166,13 @@ export class AudioOutput implements Disposable {
       this.currentSourceNode = source;
       this.nextPlayTime = startTime + audioBuffer.duration;
 
+      log.debug('Scheduled audio chunk', {
+        bytes: chunk.data.byteLength,
+        startTime: startTime.toFixed(3),
+        duration: audioBuffer.duration.toFixed(3),
+        bufferSize: this.audioBuffer.size,
+      });
+
       // Play next chunk when this one finishes
       source.onended = () => {
         this.activeSourceNodes.delete(source);
@@ -205,8 +226,14 @@ export class AudioOutput implements Disposable {
     
     // Clear the buffer
     this.audioBuffer.clear();
+    this.adaptiveBuffer.reset();
     this.nextPlayTime = 0;
     this.sessionId = null;
+
+    // Suspend AudioContext to immediately silence any scheduled audio
+    AudioContextManager.suspend().catch(() => {
+      // Ignore suspend errors - non-critical
+    });
     
     log.debug('Audio stopped completely');
   }

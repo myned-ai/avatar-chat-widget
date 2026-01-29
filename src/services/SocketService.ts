@@ -111,6 +111,24 @@ export class SocketService extends EventEmitter implements Disposable {
 
   private onMessage(event: MessageEvent): void {
     try {
+      // RAW message logging (before parsing)
+      try {
+        if (event.data instanceof ArrayBuffer) {
+          const bytes = new Uint8Array(event.data);
+          const preview = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          log.debug('WS raw message (ArrayBuffer)', { byteLength: event.data.byteLength, preview });
+        } else if (typeof event.data === 'string') {
+          const preview = event.data.length > 300 ? `${event.data.slice(0, 300)}…` : event.data;
+          log.debug('WS raw message (string)', { length: event.data.length, preview });
+        } else if (event.data instanceof Blob) {
+          log.debug('WS raw message (Blob)', { size: event.data.size, type: event.data.type });
+        } else {
+          log.debug('WS raw message (unknown)', { type: typeof event.data });
+        }
+      } catch (e) {
+        log.warn('Failed to log raw WS message', e);
+      }
+
       let message: IncomingMessage;
 
       if (event.data instanceof ArrayBuffer) {
@@ -132,6 +150,10 @@ export class SocketService extends EventEmitter implements Disposable {
       }
 
       this.emit('message', message);
+      // DEBUG: Log important message types to console (skip high-frequency ones)
+      if (message.type !== 'sync_frame' && message.type !== 'transcript_delta' && message.type !== 'blendshape') {
+        console.log('[WS] Received message type:', message.type, message);
+      }
       // Lightweight diagnostics: log incoming message metadata useful for frame-skip analysis
       try {
         const meta: Record<string, any> = { type: message.type };

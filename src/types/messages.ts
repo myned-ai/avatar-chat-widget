@@ -128,12 +128,15 @@ export interface TranscriptDeltaMessage extends BaseMessage {
   type: 'transcript_delta';
   text: string;
   role: 'user' | 'assistant';
+  startOffset: number;
+  endOffset: number;
 }
 
 export interface TranscriptDoneMessage extends BaseMessage {
   type: 'transcript_done';
   text: string;
   role: 'user' | 'assistant';
+  finalAudioDurationMs: number;
 }
 
 export type IncomingMessage = 

@@ -66,6 +66,7 @@ export class SyncPlayback implements Disposable {
   private lastReceivedFrameIndex: number | null = null;
   private lastBlendshapeUpdate = 0;
   private currentWeights: Record<string, number>;
+  private lastDropLogTime = 0;
   
   // Callbacks
   private onBlendshapeUpdate: ((weights: Record<string, number>) => void) | null = null;
@@ -191,6 +192,16 @@ export class SyncPlayback implements Disposable {
    */
   addSyncFrame(frame: SyncFrame): void {
     if (this.isStopped) {
+      const now = Date.now();
+      if (now - this.lastDropLogTime > 1000) {
+        this.lastDropLogTime = now;
+        log.debug('Dropping sync_frame while stopped', {
+          bytes: frame.audio.byteLength,
+          frameIndex: frame.frameIndex,
+          timestamp: frame.timestamp,
+          sessionId: this.sessionId,
+        });
+      }
       return;
     }
 
@@ -457,12 +468,23 @@ export class SyncPlayback implements Disposable {
    * Immediately stop all playback
    */
   stop(): void {
-    log.info('SyncPlayback stopped');
+    log.info('SyncPlayback stopped', {
+      bufferedFrames: this.frameBuffer.length,
+      scheduledFrames: this.scheduledFrames.length,
+      activeSources: this.activeSourceNodes.size,
+    });
     
     this.isStopped = true;
     this.isPlaying = false;
     this.frameBuffer = [];
     this.scheduledFrames = [];
+    this.sessionId = null;
+    this.currentFrameIndex = 0;
+    this.lastReceivedFrameIndex = null;
+    this.lastActiveFrameIndex = 0;
+    this.lastBlendshapeUpdate = 0;
+    this.nextPlayTime = 0;
+    this.audioStartTime = 0;
     
     // Cancel animation frame
     if (this.animationFrameId !== null) {
