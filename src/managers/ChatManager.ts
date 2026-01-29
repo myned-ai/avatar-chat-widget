@@ -63,6 +63,7 @@ export class ChatManager implements Disposable {
   private isRecording = false;
   private animationFrameId: number | null = null;
   private useSyncPlayback = false;  // Flag to track which playback mode is active
+  private lastMessageTimestamp = 0;  // Track latest message timestamp to reject stale sessions
 
   // Streaming transcript state - separate tracking for user and assistant to avoid mixing
   // Map streaming messages by provider item id. Fallback to generated id when absent.
@@ -317,12 +318,36 @@ export class ChatManager implements Disposable {
     
     // NEW: Handle synchronized audio+blendshape frames using SyncPlayback
     // This is the OpenAvatarChat pattern - audio and blendshapes paired together
+// NEW: Handle synchronized audio+blendshape frames using SyncPlayback
+    // This is the OpenAvatarChat pattern - audio and blendshapes paired together
     this.socketService.on('sync_frame', (message: IncomingMessage) => {
       if (message.type === 'sync_frame') {
-        // Validate session ID to prevent stale frames from previous conversations
-        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
-          log.debug('Ignoring sync_frame from stale session:', message.sessionId, 'current:', this.currentSessionId);
-          return;
+        // Implicit session start logic:
+        // If received frame belongs to a new session, initialize playback
+        // This handles cases where audio_start message is missing or dropped
+        if (message.sessionId && message.sessionId !== this.currentSessionId) {
+          // Prevent switching to latent packets from old sessions
+          if (message.timestamp && message.timestamp < this.lastMessageTimestamp) {
+            log.debug('Ignoring sync_frame from stale session:', message.sessionId);
+            return;
+          }
+
+          log.info('Implicit session start from sync_frame:', message.sessionId);
+          this.currentSessionId = message.sessionId;
+          
+          // Initialize session (resumes AudioContext, clears buffers)
+          this.syncPlayback.startSession(message.sessionId);
+          this.resetTranscriptTiming();
+          
+          // Ensure avatar is in correct state
+          this.avatar.enableLiveBlendshapes();
+          this.avatar.setChatState('Responding');
+          this.setTyping(false);
+        }
+
+        // Track latest timestamp to reject old sessions
+        if (message.timestamp && message.timestamp > this.lastMessageTimestamp) {
+          this.lastMessageTimestamp = message.timestamp;
         }
         
         // Mark that we're using sync playback (not legacy separate streams)
@@ -1190,6 +1215,31 @@ export class ChatManager implements Disposable {
     }
     
     return bytes.buffer;
+  }
+
+  /**
+   * Reset transcript timing state when a new session starts.
+   * Called on implicit session start to ensure clean state.
+   */
+  private resetTranscriptTiming(): void {
+    // Clear any pending buffered deltas from previous session
+    this.bufferedDeltas.clear();
+    for (const timeout of this.bufferTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.bufferTimeouts.clear();
+    
+    // Clear streaming state
+    this.streamingByItem.clear();
+    this.latestItemForRole = {};
+    
+    // Reset assistant turn state
+    if (this.assistantAppendInterval) {
+      clearInterval(this.assistantAppendInterval);
+      this.assistantAppendInterval = null;
+    }
+    this.currentAssistantTurnElement = null;
+    this.currentAssistantTurnText = '';
   }
 
   /**
