@@ -30,10 +30,10 @@ export const WIDGET_STYLES = `
   --text-color: #1F2937;
   --input-bg: #f5f5f7;
   --border-color: #e0e0e0;
-  /* Heights - split-view: avatar 280px (includes 56px behind header), chat 170px */
-  --widget-height: 540px;
-  --avatar-height: 280px;  /* split-view default: 224 + 56 padding */
-  --chat-height: 170px;    /* split-view default: fits suggestion chips */
+  /* Heights - avatar-focus default: avatar 280px (includes 56px behind header) */
+  --widget-height: 370px;
+  --avatar-height: 280px;  /* avatar-focus default: reduced for less bottom whitespace */
+  --chat-height: 0px;      /* avatar-focus default: no chat */
   --transition-duration: 300ms;
 }
 
@@ -111,7 +111,7 @@ export const WIDGET_STYLES = `
   max-height: 56px !important;
   flex-shrink: 0;
   flex-grow: 0;
-  padding: 12px 16px;
+  padding: 8px 16px 16px 16px; /* Less top padding to move content up */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -122,14 +122,45 @@ export const WIDGET_STYLES = `
   transition: background 0.3s ease;
 }
 
-/* Solid header when text-focus (avatar collapsed) */
+/* Solid header when text-focus (avatar collapsed) - Alcove design */
 [data-drawer-state="text-focus"] .header-layer {
   background: var(--bg-color);
+  height: 70px !important;
+  min-height: 70px !important;
+  max-height: 70px !important;
+  padding-left: 90px; /* Text indentation: 72px avatar + 18px gap */
+  overflow: visible; /* Allow avatar to overflow */
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+}
+
+/* Allow avatar circle to break out of widget in text-focus */
+[data-drawer-state="text-focus"].widget-root {
+  overflow: visible;
+  border-radius: 20px; /* Preserve rounded corners */
+}
+
+/* ==========================================================================
+   Header Avatar Circle (visible only in text-focus mode)
+   ========================================================================== */
+/* Header avatar circle - no longer used, avatar section is repositioned instead */
+.header-avatar-circle {
+  display: none;
+}
+
+.header-avatar-inner {
+  display: none;
 }
 
 .header-info {
   display: flex;
   flex-direction: column;
+  flex: 1; /* Take available space */
+}
+
+/* Center header text in text-focus mode */
+[data-drawer-state="text-focus"] .header-info {
+  text-align: center;
 }
 
 .header-title {
@@ -138,7 +169,13 @@ export const WIDGET_STYLES = `
   gap: 8px;
 }
 
+/* Center title in text-focus */
+[data-drawer-state="text-focus"] .header-title {
+  justify-content: center;
+}
+
 .header-title .status-dot {
+  display: none; /* Hidden - removed green light */
   width: 8px;
   height: 8px;
   background-color: #10b981;
@@ -162,10 +199,11 @@ export const WIDGET_STYLES = `
 .header-buttons {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px; /* Tight spacing */
+  margin-left: auto; /* Push to right */
 }
 
-/* Expand button - visible in text-focus and split-view, hidden in avatar-focus */
+/* Expand button - visible in text-focus, hidden in avatar-focus */
 .expand-btn {
   display: flex;
 }
@@ -194,20 +232,14 @@ export const WIDGET_STYLES = `
   --widget-height: 600px;
 }
 
-/* Expanded split-view: balanced avatar and chat */
-.widget-root.expanded[data-drawer-state="split-view"] {
-  --avatar-height: 340px; /* Larger avatar area */
-  --chat-height: 214px; /* 600 - 56 header - 340 avatar + 56 overlap - 90 input = ~170 but more room */
-}
-
-/* Expanded text-focus: maximize chat area (no avatar) */
+/* Expanded text-focus: larger chat area */
 .widget-root.expanded[data-drawer-state="text-focus"] {
-  --chat-height: 454px; /* 600 - 56 header - 90 input */
+  --chat-height: 454px; /* Expanded chat height */
 }
 
-/* Expanded text-focus: chat section fills available space */
+/* Expanded text-focus: chat section fills available space - uses CSS var */
 .widget-root.expanded[data-drawer-state="text-focus"] .chat-section {
-  height: 454px;
+  height: var(--chat-height);
 }
 
 .control-btn {
@@ -228,6 +260,7 @@ export const WIDGET_STYLES = `
 .control-btn svg {
   width: 18px;
   height: 18px;
+  stroke-width: 2.5; /* Bolder icons */
 }
 
 .control-btn:hover {
@@ -243,80 +276,24 @@ export const WIDGET_STYLES = `
 }
 
 /* ==========================================================================
-   View Mode Selector
+   View Mode Toggle Button
    ========================================================================== */
-.view-mode-wrapper {
-  position: relative;
+/* Default: show text icon (we're in avatar-focus), hide avatar icon */
+#viewModeBtn .text-mode-icon {
+  display: block;
 }
 
-.view-mode-dropdown {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 8px;
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  padding: 6px;
+#viewModeBtn .avatar-mode-icon {
   display: none;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 120px;
-  z-index: 100;
 }
 
-.view-mode-dropdown.open {
-  display: flex;
-  animation: dropdownFadeIn 0.15s ease-out;
+/* In text-focus mode: show avatar icon, hide text icon */
+[data-drawer-state="text-focus"] #viewModeBtn .text-mode-icon {
+  display: none;
 }
 
-@keyframes dropdownFadeIn {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.view-mode-option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: var(--text-color);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  width: 100%;
-  text-align: left;
-}
-
-.view-mode-option:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.view-mode-option.active {
-  background: rgba(75, 74, 207, 0.1);
-  color: var(--primary-color);
-}
-
-.view-mode-option.active svg {
-  stroke: var(--primary-color);
-}
-
-.theme-dark .view-mode-dropdown {
-  background: #1e2130;
-  border-color: #2a2e42;
-}
-
-.theme-dark .view-mode-option:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.theme-dark .view-mode-option.active {
-  background: rgba(75, 74, 207, 0.2);
+[data-drawer-state="text-focus"] #viewModeBtn .avatar-mode-icon {
+  display: block;
 }
 
 /* ==========================================================================
@@ -334,10 +311,60 @@ export const WIDGET_STYLES = `
   transition: height var(--transition-duration) cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* When avatar is hidden, remove the negative margin */
+/* When in text-focus mode, reposition avatar as "Mascot" orb */
 [data-drawer-state="text-focus"] .avatar-section {
+  position: absolute;
+  left: -25px; /* Hangs off the left edge */
+  top: -10px; /* Equator aligns with card top - anchored feel */
+  transform: none;
+  width: 90px; /* Bigger Mascot size */
+  height: 90px;
+  border-radius: 50%;
+  overflow: visible;
+  z-index: 100; /* Float above everything */
+  
+  /* The Casing - thick white border */
+  border: 4px solid #FFFFFF;
+  
+  /* Softer shadow - mainly downwards (porthole, not sticker) */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    
   margin-top: 0;
   padding-top: 0;
+  transition: none;
+}
+
+/* Clip avatar content to circle but allow status dot to overflow */
+[data-drawer-state="text-focus"] .avatar-stage {
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+/* Green status dot on avatar circle in text-focus mode - HIDDEN */
+[data-drawer-state="text-focus"] .avatar-section::after {
+  display: none;
+}
+
+/* Hide status dot from header text in text-focus mode */
+[data-drawer-state="text-focus"] .header-title .status-dot {
+  display: none;
+}
+
+[data-drawer-state="text-focus"] .avatar-stage {
+  background: white;
+}
+
+.theme-dark [data-drawer-state="text-focus"] .avatar-stage {
+  background: #1e2130;
+}
+
+/* Keep canvas at full resolution for quality, just reposition to show face in circle */
+[data-drawer-state="text-focus"] .avatar-render-container {
+  width: 800px;
+  height: 800px;
+  top: 58%; /* Adjust for 80px circle */
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.24); /* Zoomed out 5% for porthole effect - show shoulders */
 }
 
 .avatar-stage {
@@ -372,6 +399,211 @@ export const WIDGET_STYLES = `
   width: 100% !important;
   height: 100% !important;
   object-fit: contain;
+}
+
+/* Avatar position adjustment for avatar-focus mode - balanced for reduced widget height */
+[data-drawer-state="avatar-focus"] .avatar-render-container {
+  top: 52%;
+}
+
+/* ==========================================================================
+   Avatar Mist Overlay - Permanent gradient to hide messy splat edges
+   Creates seamless fade from avatar into white background
+   ========================================================================== */
+.avatar-mist-overlay {
+  position: absolute;
+  bottom: -40px; /* Lowered significantly to match avatar position */
+  left: 0;
+  width: 100%;
+  height: 140px; /* Increased height to cover more area */
+  
+  /* The Magic Gradient: Transparent top -> Solid White bottom */
+  background: linear-gradient(to bottom, 
+    rgba(255, 255, 255, 0) 0%, 
+    rgba(255, 255, 255, 0.7) 45%,
+    rgba(255, 255, 255, 0.9) 70%,
+    #FFFFFF 100%
+  );
+  
+  z-index: 10; /* ON TOP of avatar, BEHIND text/input */
+  pointer-events: none; /* Let clicks pass through */
+}
+
+/* Dark theme mist - fades to dark background */
+.theme-dark .avatar-mist-overlay {
+  background: linear-gradient(to bottom, 
+    rgba(15, 17, 26, 0) 0%, 
+    rgba(15, 17, 26, 0.7) 45%,
+    rgba(15, 17, 26, 0.9) 70%,
+    #0f111a 100%
+  );
+}
+
+/* Only show mist in avatar-focus mode */
+[data-drawer-state="avatar-focus"] .avatar-mist-overlay {
+  display: block;
+}
+
+/* Hide mist in text-focus mode */
+[data-drawer-state="text-focus"] .avatar-mist-overlay {
+  display: none;
+}
+
+/* ==========================================================================
+   Avatar Subtitles - Floating Text in the Mist (visible only in avatar-focus mode)
+   Clean, minimal text floating in the white mist zone
+   ========================================================================== */
+.avatar-subtitles {
+  display: none;
+  position: absolute;
+  bottom: 0px; /* Balanced position in the mist zone */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  text-align: center;
+  
+  /* Typography - Editorial "Elegant" Look */
+  font-family: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500; /* Medium - not bold, less aggressive */
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  color: #374151; /* Soft Dark Grey - easier on the eyes */
+  
+  /* NO background box - floating text */
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0 24px;
+  
+  /* Tiny shadow to lift it off the mist */
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+  
+  /* Layout */
+  z-index: 25; /* Above the mist layer (mist is z-index 10) */
+  max-width: 100%;
+  width: auto;
+  
+  /* Smooth appearance */
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+/* Fade in animation */
+@keyframes subtitleFadeIn {
+  from { 
+    opacity: 0; 
+    transform: translateY(4px);
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0);
+  }
+}
+
+.avatar-subtitles.visible {
+  animation: subtitleFadeIn 0.3s ease forwards;
+}
+
+/* Dark theme - light text with dark glow */
+.theme-dark .avatar-subtitles {
+  color: #F9FAFB;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5),
+               0 0 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Only show subtitles in avatar-focus mode */
+[data-drawer-state="avatar-focus"] .avatar-subtitles {
+  display: block;
+}
+
+/* Hide subtitles in text-focus mode */
+[data-drawer-state="text-focus"] .avatar-subtitles {
+  display: none !important;
+}
+
+/* Show when has content */
+[data-drawer-state="avatar-focus"] .avatar-subtitles:not(:empty) {
+  opacity: 1;
+}
+
+/* Hide when empty */
+.avatar-subtitles:empty {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* User subtitle style - accent color, no box */
+.avatar-subtitles.user-speaking {
+  color: #4B4ACF;
+}
+
+.theme-dark .avatar-subtitles.user-speaking {
+  color: #a5a4f3;
+}
+
+/* ==========================================================================
+   Avatar Suggestions (visible only in avatar-focus mode)
+   ========================================================================== */
+.avatar-suggestions {
+  display: none;
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 320px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  z-index: 15;
+}
+
+/* Show only in avatar-focus mode */
+[data-drawer-state="avatar-focus"] .avatar-suggestions {
+  display: flex;
+}
+
+/* Hide when conversation has started */
+.widget-root.has-messages .avatar-suggestions {
+  display: none !important;
+}
+
+.avatar-suggestions .suggestion-chip {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.avatar-suggestions .suggestion-chip:hover {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(75, 74, 207, 0.25);
+}
+
+.theme-dark .avatar-suggestions .suggestion-chip {
+  background: rgba(30, 33, 48, 0.9);
+  border-color: #3f445e;
+  color: #e0e0e0;
+}
+
+.theme-dark .avatar-suggestions .suggestion-chip:hover {
+  background: var(--primary-color);
+  color: white;
 }
 
 /* ==========================================================================
@@ -420,7 +652,7 @@ export const WIDGET_STYLES = `
 /* Chat Messages */
 .chat-messages {
   flex: 1;
-  padding: 12px 16px;
+  padding: 12px 16px 4px 16px;
   overflow-y: auto;  /* Only show scrollbar when needed */
   display: flex;
   flex-direction: column;
@@ -430,6 +662,11 @@ export const WIDGET_STYLES = `
   opacity: 0; /* Hidden initially - show when has messages */
   pointer-events: none;
   transition: opacity 0.2s ease;
+}
+
+/* Add top padding in text-focus so messages don't start under avatar */
+[data-drawer-state="text-focus"] .chat-messages {
+  padding-top: 20px;
 }
 
 /* Show scrollbar on hover */
@@ -566,8 +803,14 @@ export const WIDGET_STYLES = `
   z-index: 100; /* Above everything */
 }
 
-/* Upward gradient to soften the hard edge where footer meets chat */
-.input-layer::before {
+/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
+[data-drawer-state="text-focus"] .input-layer {
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+
+/* Upward gradient to soften the hard edge where footer meets chat - only in text-focus mode */
+[data-drawer-state="text-focus"] .input-layer::before {
   content: '';
   position: absolute;
   top: -20px;
@@ -576,6 +819,11 @@ export const WIDGET_STYLES = `
   height: 20px;
   background: linear-gradient(to top, var(--bg-color) 0%, transparent 100%);
   pointer-events: none;
+}
+
+/* No gradient in avatar-focus mode - subtitles need to be crisp */
+[data-drawer-state="avatar-focus"] .input-layer::before {
+  display: none;
 }
 
 /* ==========================================================================
@@ -609,23 +857,22 @@ export const WIDGET_STYLES = `
   border-radius: 18px;
   font-size: 13px;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.6; /* Breathing room for readability */
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 .message.user .message-bubble {
-  background: var(--primary-color);  /* Flat solid color instead of gradient */
+  background: var(--primary-color);  /* Solid brand color */
   color: white;
   border-bottom-right-radius: 4px;
-  /* No drop shadow - looks like content, not a button */
 }
 
 .message.assistant .message-bubble {
-  background: white;
-  color: var(--text-color);
+  background: #FFFFFF; /* White card */
+  color: #374151; /* Dark text */
   border-bottom-left-radius: 4px;
-  border: 1px solid var(--border-color);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #F3F4F6; /* Very subtle border for definition */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06); /* Soft shadow - creates elevation */
 }
 
 .message-footer {
@@ -643,8 +890,10 @@ export const WIDGET_STYLES = `
 }
 
 .theme-dark .message.assistant .message-bubble {
-  background: #1a1a2e;
+  background: #1e2130; /* Dark card */
   color: #e0e0e0;
+  border: 1px solid #2a2e42; /* Subtle dark border */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2); /* Shadow for elevation */
 }
 
 /* Chat Input Area */
@@ -652,6 +901,12 @@ export const WIDGET_STYLES = `
   padding: 16px;
   background: var(--bg-color);
   flex-shrink: 0;
+}
+
+/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
+[data-drawer-state="text-focus"] .chat-input-area {
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
 }
 
 .chat-input-wrapper {
@@ -830,7 +1085,7 @@ export const WIDGET_STYLES = `
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 14px; /* Slightly larger */
+  width: 14px;
   height: 14px;
   background: #10b981;
   border: 2px solid white;

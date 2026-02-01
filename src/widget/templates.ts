@@ -10,9 +10,15 @@
  */
 
 export const WIDGET_TEMPLATE = `
-<div class="widget-root" data-drawer-state="split-view">
+<div class="widget-root" data-drawer-state="avatar-focus">
   <!-- Header (fixed height, always visible) -->
   <div class="header-layer">
+    <!-- Avatar circle for text-focus mode (real avatar canvas will be moved here) -->
+    <div class="header-avatar-circle" id="headerAvatarCircle">
+      <div class="header-avatar-inner" id="headerAvatarInner">
+        <!-- Canvas will be moved here in text-focus mode -->
+      </div>
+    </div>
     <div class="header-info">
       <div class="header-title">
         <span class="status-dot"></span>
@@ -35,41 +41,19 @@ export const WIDGET_TEMPLATE = `
           <line x1="3" y1="21" x2="10" y2="14"></line>
         </svg>
       </button>
-      <!-- View Mode Selector -->
-      <div class="view-mode-wrapper">
-        <button id="viewModeBtn" class="control-btn" aria-label="Change view mode" title="View mode" aria-haspopup="true" aria-expanded="false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-        </button>
-        <div class="view-mode-dropdown" id="viewModeDropdown">
-          <button class="view-mode-option" data-mode="avatar-focus">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="8" r="5"></circle>
-              <path d="M20 21a8 8 0 1 0-16 0"></path>
-            </svg>
-            <span>Avatar</span>
-          </button>
-          <button class="view-mode-option active" data-mode="split-view">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-              <line x1="3" y1="12" x2="21" y2="12"></line>
-            </svg>
-            <span>Split</span>
-          </button>
-          <button class="view-mode-option" data-mode="text-focus">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="17" y1="10" x2="3" y2="10"></line>
-              <line x1="21" y1="6" x2="3" y2="6"></line>
-              <line x1="21" y1="14" x2="3" y2="14"></line>
-              <line x1="17" y1="18" x2="3" y2="18"></line>
-            </svg>
-            <span>Text</span>
-          </button>
-        </div>
-      </div>
-      <button id="minimizeBtn" class="control-btn" aria-label="Minimize chat" title="Minimize">
+      <!-- View Mode Toggle Button -->
+      <button id="viewModeBtn" class="control-btn" aria-label="Toggle view mode" title="Chat View">
+        <!-- Chat bubble icon (shown in avatar-focus mode) -->
+        <svg class="text-mode-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <!-- Video camera icon (shown in text-focus mode) -->
+        <svg class="avatar-mode-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+          <polygon points="23 8 16 12 23 16 23 8"></polygon>
+        </svg>
+      </button>
+      <button id="minimizeBtn" class="control-btn" aria-label="Close" title="Close">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -83,6 +67,14 @@ export const WIDGET_TEMPLATE = `
     <div class="avatar-stage" id="avatarContainer" aria-label="AI Avatar Scene">
       <!-- Avatar Canvas gets injected here by code -->
       <div class="avatar-placeholder"></div>
+    </div>
+    <!-- White Mist Overlay - hides messy splat edges permanently -->
+    <div class="avatar-mist-overlay" aria-hidden="true"></div>
+    <!-- Subtitles (only visible in avatar-focus mode) - floats in the mist -->
+    <div class="avatar-subtitles" id="avatarSubtitles" aria-live="polite"></div>
+    <!-- Avatar Suggestions (only visible in avatar-focus mode) -->
+    <div class="avatar-suggestions" id="avatarSuggestions">
+      <!-- Chips injected dynamically from config.suggestions -->
     </div>
   </div>
 
@@ -116,19 +108,11 @@ export const WIDGET_TEMPLATE = `
             <input type="text" id="chatInput" placeholder="Ask me anything..." aria-label="Message input" autocomplete="off" />
              
              <!-- Mic Button (Prominent) -->
-             <button id="micBtn" class="input-button" aria-label="Voice input">
+             <button id="micBtn" class="input-button" aria-label="Voice input" title="Voice Input">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                   <line x1="12" x2="12" y1="19" y2="22"/>
-                </svg>
-             </button>
-             
-             <!-- Send Button -->
-             <button id="sendBtn" class="input-button" aria-label="Send message">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 2 11 13"/>
-                  <path d="M22 2 15 22 11 13 2 9 22 2z"/>
                 </svg>
              </button>
          </div>

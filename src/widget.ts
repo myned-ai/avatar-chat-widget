@@ -288,10 +288,11 @@ class AvatarChatElement extends HTMLElement {
       // Get shadow DOM elements for ChatManager
       const chatMessages = this.shadow.getElementById('chatMessages');
       const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
-      const sendBtn = this.shadow.getElementById('sendBtn') as HTMLButtonElement;
+      const sendBtn = this.shadow.getElementById('sendBtn') as HTMLButtonElement | undefined;
       const micBtn = this.shadow.getElementById('micBtn') as HTMLButtonElement;
+      const avatarSubtitles = this.shadow.getElementById('avatarSubtitles') as HTMLElement;
 
-      if (!chatMessages || !chatInput || !sendBtn || !micBtn) {
+      if (!chatMessages || !chatInput || !micBtn) {
         throw new Error('Required DOM elements not found');
       }
 
@@ -300,7 +301,7 @@ class AvatarChatElement extends HTMLElement {
         shadowRoot: this.shadow,
         chatMessages,
         chatInput,
-        sendBtn,
+        sendBtn: sendBtn || undefined,
         micBtn,
         onConnectionChange: (connected) => {
           this._isConnected = connected;
@@ -314,6 +315,20 @@ class AvatarChatElement extends HTMLElement {
         },
         onError: (err) => {
           this.config.onError?.(err);
+        },
+        onSubtitleUpdate: (text, role) => {
+          // Update subtitle element with current text (replaces content)
+          if (avatarSubtitles) {
+            // Trigger fade-in animation on new content
+            if (text && !avatarSubtitles.classList.contains('visible')) {
+              avatarSubtitles.classList.add('visible');
+            } else if (!text) {
+              avatarSubtitles.classList.remove('visible');
+            }
+            avatarSubtitles.textContent = text;
+            // Apply different styling for user vs assistant
+            avatarSubtitles.classList.toggle('user-speaking', role === 'user');
+          }
         },
       });
 
@@ -361,23 +376,32 @@ class AvatarChatElement extends HTMLElement {
 
     // Quick Replies Logic
     const quickReplies = this.shadow.getElementById('quickReplies');
+    const avatarSuggestions = this.shadow.getElementById('avatarSuggestions');
     const sendBtn = this.shadow.getElementById('sendBtn');
     const micBtn = this.shadow.getElementById('micBtn');
     
-    // Populate suggestion chips from config
-    if (quickReplies && this.config.suggestions && this.config.suggestions.length > 0) {
-      quickReplies.innerHTML = this.config.suggestions
+    // Populate suggestion chips from config (both in chat and avatar sections)
+    if (this.config.suggestions && this.config.suggestions.length > 0) {
+      const chipsHtml = this.config.suggestions
         .map(text => `<button class="suggestion-chip">${this.escapeHtml(text)}</button>`)
         .join('');
+      
+      if (quickReplies) {
+        quickReplies.innerHTML = chipsHtml;
+      }
+      if (avatarSuggestions) {
+        avatarSuggestions.innerHTML = chipsHtml;
+      }
     }
     
-    if (quickReplies && chatInput && sendBtn) {
+    if (chatInput) {
       const hideSuggestions = () => {
-        quickReplies.classList.add('hidden');
+        quickReplies?.classList.add('hidden');
+        // Avatar suggestions are hidden via CSS when has-messages class is added
       };
 
-      // 1. Chip Click
-      quickReplies.addEventListener('click', (e) => {
+      // Handle chip clicks from both chat and avatar suggestions
+      const handleChipClick = (e: Event) => {
         const target = e.target as HTMLElement;
         if (target.classList.contains('suggestion-chip')) {
           this.markHasMessages(); // Mark has messages immediately
@@ -385,32 +409,24 @@ class AvatarChatElement extends HTMLElement {
           const text = target.textContent;
           if (text) {
             chatInput.value = text;
-            inputControls?.classList.add('has-text'); // Show send button
-            // Trigger send with a small delay for visual feedback
-            setTimeout(() => sendBtn.click(), UI_DELAY.CHIP_CLICK_SEND);
+            inputControls?.classList.add('has-text');
+            // Dispatch enter key to trigger ChatManager's send
+            chatInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true }));
           }
         }
-      });
+      };
 
-      // 2. Hide on Send
-      sendBtn.addEventListener('click', () => {
-        this.markHasMessages(); // Mark has messages immediately
-        hideSuggestions();
-        // Force UI cleanup after ChatManager handles send
-        setTimeout(() => {
-           if (chatInput.value.trim() === '') {
-               inputControls?.classList.remove('has-text');
-           }
-        }, UI_DELAY.INPUT_CLEANUP);
-      });
+      // 1. Chip Click handlers for both suggestion areas
+      quickReplies?.addEventListener('click', handleChipClick);
+      avatarSuggestions?.addEventListener('click', handleChipClick);
 
-      // 3. Hide on Voice Start
+      // 2. Hide on Voice Start
       micBtn?.addEventListener('click', () => {
         this.markHasMessages(); // Mark has messages immediately
         hideSuggestions();
       });
 
-      // 4. Hide on Enter Key
+      // 3. Hide on Enter Key and cleanup
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           this.markHasMessages(); // Mark has messages immediately
@@ -495,61 +511,51 @@ class AvatarChatElement extends HTMLElement {
   }
 
   /**
-   * Setup view mode dropdown button and options
+   * Setup view mode toggle button
    */
   private setupViewModeSelector(): void {
     const viewModeBtn = this.shadow.getElementById('viewModeBtn') as HTMLButtonElement;
-    const dropdown = this.shadow.getElementById('viewModeDropdown') as HTMLElement;
-    const options = this.shadow.querySelectorAll('.view-mode-option') as NodeListOf<HTMLButtonElement>;
     const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
     const expandBtn = this.shadow.getElementById('expandBtn') as HTMLButtonElement;
 
-    if (!viewModeBtn || !dropdown) {
-      log.warn('View mode elements not found');
+    if (!viewModeBtn) {
+      log.warn('View mode button not found');
       return;
     }
 
-    // Toggle dropdown on button click
+    // Toggle between avatar-focus and text-focus on click
     viewModeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const isOpen = dropdown.classList.toggle('open');
-      viewModeBtn.setAttribute('aria-expanded', String(isOpen));
-    });
-
-    // Close dropdown when clicking outside
-    document.addEventListener('click', () => {
-      dropdown.classList.remove('open');
-      viewModeBtn.setAttribute('aria-expanded', 'false');
-    });
-
-    // Handle option selection
-    options.forEach((option) => {
-      option.addEventListener('click', () => {
-        const mode = option.dataset.mode as DrawerState;
-        if (mode && this.drawerController) {
-          // Remove expanded state when switching to avatar-focus (avatar mode shouldn't expand)
-          if (mode === 'avatar-focus') {
-            widgetRoot.classList.remove('expanded');
-            expandBtn.setAttribute('aria-label', 'Expand chat');
-            expandBtn.setAttribute('title', 'Expand');
-          }
-          this.drawerController.setState(mode);
+      if (this.drawerController) {
+        const currentState = this.drawerController.getState();
+        const newState: DrawerState = currentState === 'avatar-focus' ? 'text-focus' : 'avatar-focus';
+        
+        // Remove expanded state when switching to avatar-focus
+        if (newState === 'avatar-focus') {
+          widgetRoot.classList.remove('expanded');
+          expandBtn.setAttribute('aria-label', 'Expand chat');
+          expandBtn.setAttribute('title', 'Expand');
         }
-        dropdown.classList.remove('open');
-        viewModeBtn.setAttribute('aria-expanded', 'false');
-      });
+        
+        // Update view mode button tooltip
+        if (newState === 'text-focus') {
+          viewModeBtn.setAttribute('title', 'Avatar View');
+          viewModeBtn.setAttribute('aria-label', 'Switch to Avatar View');
+        } else {
+          viewModeBtn.setAttribute('title', 'Chat View');
+          viewModeBtn.setAttribute('aria-label', 'Switch to Chat View');
+        }
+        
+        this.drawerController.setState(newState);
+      }
     });
   }
 
   /**
-   * Update view mode UI to reflect current state
+   * Update view mode UI to reflect current state (no longer needed with toggle button)
    */
-  private updateViewModeUI(state: DrawerState): void {
-    const options = this.shadow.querySelectorAll('.view-mode-option') as NodeListOf<HTMLButtonElement>;
-    options.forEach((option) => {
-      const isActive = option.dataset.mode === state;
-      option.classList.toggle('active', isActive);
-    });
+  private updateViewModeUI(_state: DrawerState): void {
+    // Icon switching is handled by CSS based on data-drawer-state attribute
   }
 
   /**

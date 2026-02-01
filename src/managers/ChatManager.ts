@@ -45,6 +45,8 @@ export interface ChatManagerOptions {
   onConnectionChange?: (connected: boolean) => void;
   onMessage?: (msg: { role: 'user' | 'assistant'; text: string }) => void;
   onError?: (error: Error) => void;
+  /** Called on each transcript delta for subtitles (replaces, not appends) */
+  onSubtitleUpdate?: (text: string, role: 'user' | 'assistant') => void;
 }
 
 export class ChatManager implements Disposable {
@@ -231,8 +233,8 @@ export class ChatManager implements Disposable {
   private setupEventListeners(): void {
     const root = this.options.shadowRoot || document;
     
-    // Send button
-    this.sendBtn.addEventListener('click', () => this.sendTextMessage());
+    // Send button (optional - may not exist if users use Enter to send)
+    this.sendBtn?.addEventListener('click', () => this.sendTextMessage());
     
     // Enter key to send
     this.chatInput.addEventListener('keypress', (e) => {
@@ -377,6 +379,11 @@ export class ChatManager implements Disposable {
     this.protocolClient.on('transcript_done', (event: TranscriptDoneEvent) => {
         log.debug(`Transcript done [${event.role}]: ${event.text}`);
         
+<<<<<<< HEAD
+        if (role === 'assistant') {
+          // Just finalize the turn - clears subtitle and flushes remaining buffer
+          this.finalizeAssistantTurn();
+=======
         if (event.role === 'assistant') {
             // Helper to replace text if interrupted
             if (event.interrupted) {
@@ -387,6 +394,7 @@ export class ChatManager implements Disposable {
                  }
             }
             this.finalizeAssistantTurn();
+>>>>>>> f00db4deb565d7be8bf4ca0cc9f83387085850ba
         } else {
             // User message
             const hasStreaming = (event.itemId && this.streamingByItem.has(event.itemId)) || 
@@ -466,6 +474,9 @@ export class ChatManager implements Disposable {
   sendText(text: string): void {
     if (!text.trim()) return;
     
+    // Show user text in subtitle
+    this.options.onSubtitleUpdate?.(text, 'user');
+    
     // Add to UI
     this.addMessage(text, 'user');
 
@@ -492,6 +503,9 @@ export class ChatManager implements Disposable {
     if (this.avatar.getChatState() === 'Idle') {
       this.avatar.setChatState('Hello');
     }
+
+    // Show user text in subtitle
+    this.options.onSubtitleUpdate?.(text, 'user');
 
     // Add to UI
     this.addMessage(text, 'user');
@@ -668,7 +682,8 @@ export class ChatManager implements Disposable {
   }
 
   /**
-   * Append buffered deltas to the assistant bubble (called every second)
+   * Append buffered deltas to the assistant bubble (called every 500ms)
+   * Also updates subtitle with the buffered text
    */
   private appendBufferedToAssistantBubble(): void {
     const buffered = this.bufferedDeltas.get(this.ASSISTANT_TURN_KEY);
@@ -677,6 +692,9 @@ export class ChatManager implements Disposable {
     // Take all buffered text and clear the buffer
     const text = buffered.join('');
     this.bufferedDeltas.set(this.ASSISTANT_TURN_KEY, []);
+
+    // Update subtitle with the buffered chunk (replace, not append)
+    this.options.onSubtitleUpdate?.(text, 'assistant');
 
     // Create or append to the bubble
     if (!this.currentAssistantTurnElement) {
@@ -723,6 +741,9 @@ export class ChatManager implements Disposable {
     // Flush any remaining buffered content
     this.appendBufferedToAssistantBubble();
     this.bufferedDeltas.delete(this.ASSISTANT_TURN_KEY);
+
+    // Clear subtitle
+    this.options.onSubtitleUpdate?.('', 'assistant');
 
     if (!this.currentAssistantTurnElement) return;
 
