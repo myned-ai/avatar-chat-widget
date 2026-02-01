@@ -51,6 +51,11 @@ export interface ChatMessageOut extends BaseMessage {
   userId?: string;
 }
 
+// Interrupt message for client-initiated interruption
+export interface InterruptOutMessage extends BaseMessage {
+  type: 'interrupt';
+}
+
 export type OutgoingMessage =
   | OutgoingTextMessage
   | OutgoingAudioMessage
@@ -58,7 +63,8 @@ export type OutgoingMessage =
   | AudioStreamEndMessage
   | AudioInputMessage
   | PingMessage
-  | ChatMessageOut;
+  | ChatMessageOut
+  | InterruptOutMessage;
 
 // Incoming Messages (Server -> Client)
 export interface IncomingTextMessage extends BaseMessage {

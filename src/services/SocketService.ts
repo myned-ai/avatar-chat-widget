@@ -261,6 +261,7 @@ export class SocketService extends EventEmitter implements Disposable {
 
   send(message: OutgoingMessage): void {
     if (!this.isConnected()) {
+      log.warn(`Socket not connected (state: ${this.ws?.readyState}), queueing message type: ${message.type}`);
       this.queueMessage(message);
       return;
     }

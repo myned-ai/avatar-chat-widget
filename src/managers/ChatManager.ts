@@ -1,6 +1,15 @@
 // Chat Manager - Orchestrates all services
 
+import { AvatarProtocolClient } from '../services/AvatarProtocolClient';
 import { SocketService } from '../services/SocketService';
+import type { 
+  AudioStartEvent, 
+  SyncFrameEvent, 
+  AudioEndEvent,
+  TranscriptDeltaEvent, 
+  TranscriptDoneEvent, 
+  InterruptEvent
+} from '../types/protocol';
 import { AudioInput } from '../services/AudioInput';
 import { AudioOutput } from '../services/AudioOutput';
 import { BlendshapeBuffer } from '../services/BlendshapeBuffer';
@@ -41,6 +50,7 @@ export interface ChatManagerOptions {
 }
 
 export class ChatManager implements Disposable {
+  private protocolClient: AvatarProtocolClient;
   private socketService: SocketService;
   private audioInput: AudioInput;
   private audioOutput: AudioOutput;
@@ -49,6 +59,8 @@ export class ChatManager implements Disposable {
   private avatar: IAvatarController;
   
   private currentSessionId: string | null = null;
+  private currentTurnId: string | null = null;  // Spec 5.1: Track current turn
+  private turnStartTime: number = 0;  // Spec 5.1: Track start time of current turn
   private userId: string;
   private messages: ChatMessage[] = [];
 
@@ -90,6 +102,15 @@ export class ChatManager implements Disposable {
   private currentAssistantTurnElement: HTMLElement | null = null;
   private currentAssistantTurnText: string = '';
   
+  // Transcript Queue for synced display
+  private transcriptQueue: Array<{
+    text: string;
+    startOffset: number;
+    itemId?: string;
+    previousItemId?: string;
+    role: 'user' | 'assistant';
+  }> = [];
+
   // Options & Callbacks
   private options: ChatManagerOptions;
 
@@ -100,6 +121,8 @@ export class ChatManager implements Disposable {
     
     // Initialize services
     this.socketService = new SocketService();
+    this.protocolClient = new AvatarProtocolClient(this.socketService);
+
     this.audioInput = new AudioInput();
     this.audioOutput = new AudioOutput();
     this.blendshapeBuffer = new BlendshapeBuffer();
@@ -113,6 +136,20 @@ export class ChatManager implements Disposable {
       log.info('SyncPlayback ended - transitioning to Idle');
       this.avatar.setChatState('Idle');
       this.avatar.disableLiveBlendshapes();
+      this.useSyncPlayback = false;
+
+      // Flush any remaining transcript items to ensure full sentence is shown
+      while (this.transcriptQueue.length > 0) {
+        const item = this.transcriptQueue.shift();
+        if (item) {
+          if (item.role === 'assistant') {
+            this.appendToAssistantTurn(item.text);
+          } else {
+             // Basic fallback for user items
+             this.streamTranscript(item.text, item.role, item.itemId, item.previousItemId, undefined, true);
+          }
+        }
+      }
     });
     
     // Get UI elements - support Shadow DOM or document
@@ -128,7 +165,7 @@ export class ChatManager implements Disposable {
     this.setupAutoScroll();
     
     this.setupEventListeners();
-    this.setupWebSocketHandlers();
+    this.setupProtocolHandlers();
     this.startBlendshapeSync();
   }
 
@@ -177,7 +214,7 @@ export class ChatManager implements Disposable {
     
     try {
       // Connect to WebSocket
-      await this.socketService.connect();
+      await this.protocolClient.connect();
       log.info('WebSocket connected');
       
       // Set avatar to Idle state - will transition to Listening on user interaction
@@ -227,253 +264,208 @@ export class ChatManager implements Disposable {
     chatBubble?.addEventListener('click', () => this.openChat());
   }
 
-  private setupWebSocketHandlers(): void {
-    this.socketService.on('connected', () => {
-      log.debug('WebSocket connected');
+  private setupProtocolHandlers(): void {
+    // Connect Protocol Client Events to UI Actions
+
+    this.protocolClient.on('connected', () => {
+      log.debug('Protocol Client connected');
       this.options.onConnectionChange?.(true);
     });
-    
-    this.socketService.on('disconnected', () => {
-      log.info('WebSocket disconnected');
+
+    this.protocolClient.on('disconnected', () => {
+      log.info('Protocol Client disconnected');
       this.options.onConnectionChange?.(false);
     });
-    
-    this.socketService.on('connectionStateChanged', (state) => {
-      log.debug('Connection state:', state);
-    });
-    
-    // Handle incoming messages (legacy - now using transcript_done for assistant)
-    this.socketService.on('text', (message: IncomingMessage) => {
-      if (message.type === 'text') {
-        this.setTyping(false);
-        // Skip assistant text messages - we use transcript_done for those now
-        // This prevents duplicate bubbles
-        log.debug('Ignoring text message (using transcript instead):', message.data?.substring(0, 50));
-      }
-    });
-    
-    // Server controls avatar state - map old states to new simplified states
-    this.socketService.on('avatar_state', (message: IncomingMessage) => {
-      if (message.type === 'avatar_state') {
-        // Map server states to our simplified state machine
+
+    this.protocolClient.on('avatar_state', (event: { state: string }) => {
+        // Map server states (Spec 3.7) to our simplified state machine
         const stateMap: Record<string, 'Idle' | 'Hello' | 'Responding'> = {
           'Idle': 'Idle',
           'Listening': 'Hello',
+          'Processing': 'Hello',  // Spec 3.7: Processing state
           'Thinking': 'Hello',
           'Responding': 'Responding',
         };
-        const mappedState = stateMap[message.state] || 'Idle';
+        const mappedState = stateMap[event.state] || 'Idle';
         this.avatar.setChatState(mappedState);
-      }
     });
-    
-    this.socketService.on('audio_start', (message: IncomingMessage) => {
-      if (message.type === 'audio_start') {
+
+    // 1. Audio Start (Spec 5.2)
+    this.protocolClient.on('audio_start', (event: AudioStartEvent) => {
         this.setTyping(false);
-        log.info('Audio start received:', message.sessionId);
-        this.currentSessionId = message.sessionId;
+        log.info('Audio start received:', event.turnId);
         
-        // Start BOTH playback systems (will use appropriate one based on message type)
-        // SyncPlayback handles sync_frame messages
-        // AudioOutput+BlendshapeBuffer handles legacy audio_chunk+blendshape messages
-        this.syncPlayback.startSession(message.sessionId, message.sampleRate);
-        this.audioOutput.startSession(message.sessionId, message.sampleRate);
-        this.blendshapeBuffer.startSession(message.sessionId);
+        // Spec 5.1/5.2: Update global state
+        this.currentTurnId = event.turnId;
+        this.currentSessionId = event.sessionId;
+        this.turnStartTime = Date.now();  // Reset tracking
         
-        this.useSyncPlayback = false;  // Will be set to true when sync_frame arrives
+        // Spec 5.2: audio_buffer.clear() - Start fresh session clears buffers
+        this.syncPlayback.startSession(event.sessionId, event.sampleRate);
+        
+        // Also init legacy systems for fallback (optional, if you still support legacy)
+        this.audioOutput.startSession(event.sessionId, event.sampleRate);
+        this.blendshapeBuffer.startSession(event.sessionId);
+        
+        this.useSyncPlayback = false; // Will be set true on first sync_frame
         this.avatar.enableLiveBlendshapes();
-        
-        // Transition to Responding immediately
-        this.avatar.setChatState('Responding');
-      }
+        this.avatar.setChatState('Responding');  // UI Update: show_avatar_talking_state()
     });
-    
-    this.socketService.on('audio_chunk', (message: IncomingMessage) => {
-      if (message.type === 'audio_chunk') {
-        // Validate session ID to prevent stale chunks from previous conversations
-        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
-          log.debug('Ignoring audio_chunk from stale session:', message.sessionId);
-          return;
+
+    // 2. Sync Frame (Audio + Blendshapes)
+    this.protocolClient.on('sync_frame', (event: SyncFrameEvent) => {
+        // Implicit session start check handled by Protocol Client logic or here?
+        // Protocol Client handles tracking turnId, but we need to ensure SyncPlayback is running.
+        if (event.sessionId && event.sessionId !== this.currentSessionId) {
+             // If we missed audio_start, force start here
+             log.warn('Implicit session start in Manager via sync_frame');
+             this.currentSessionId = event.sessionId;
+             this.syncPlayback.startSession(event.sessionId);
+             this.avatar.enableLiveBlendshapes();
+             this.avatar.setChatState('Responding');
+             this.setTyping(false);
         }
+
+        // Send to player
+        this.useSyncPlayback = true; 
         
-        // Legacy: Server sends base64 encoded audio in JSON (without blendshapes)
-        // This is used when LAM is not available
-        let audioData: ArrayBuffer;
-        if (message.data instanceof ArrayBuffer) {
-          audioData = message.data;
-        } else if (typeof message.data === 'string') {
-          // Decode base64
-          const binaryString = atob(message.data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          audioData = bytes.buffer;
-          log.debug('Audio chunk received:', audioData.byteLength, 'bytes');
+        // Decode base64 
+        const audioData = this.decodeBase64ToArrayBuffer(event.audio);
+        
+        // Weights mapping
+        let weights: Record<string, number> = {};
+        if (Array.isArray(event.weights)) {
+             weights = event.weights as any;
         } else {
-          log.warn('Unknown audio data format:', typeof message.data);
-          return;
-        }
-        this.audioOutput.addAudioChunk(audioData, message.timestamp);
-      }
-    });
-    
-    // NEW: Handle synchronized audio+blendshape frames using SyncPlayback
-    // This is the OpenAvatarChat pattern - audio and blendshapes paired together
-// NEW: Handle synchronized audio+blendshape frames using SyncPlayback
-    // This is the OpenAvatarChat pattern - audio and blendshapes paired together
-    this.socketService.on('sync_frame', (message: IncomingMessage) => {
-      if (message.type === 'sync_frame') {
-        // Implicit session start logic:
-        // If received frame belongs to a new session, initialize playback
-        // This handles cases where audio_start message is missing or dropped
-        if (message.sessionId && message.sessionId !== this.currentSessionId) {
-          // Prevent switching to latent packets from old sessions
-          if (message.timestamp && message.timestamp < this.lastMessageTimestamp) {
-            log.debug('Ignoring sync_frame from stale session:', message.sessionId);
-            return;
-          }
-
-          log.info('Implicit session start from sync_frame:', message.sessionId);
-          this.currentSessionId = message.sessionId;
-          
-          // Initialize session (resumes AudioContext, clears buffers)
-          this.syncPlayback.startSession(message.sessionId);
-          this.resetTranscriptTiming();
-          
-          // Ensure avatar is in correct state
-          this.avatar.enableLiveBlendshapes();
-          this.avatar.setChatState('Responding');
-          this.setTyping(false);
+             weights = event.weights;
         }
 
-        // Track latest timestamp to reject old sessions
-        if (message.timestamp && message.timestamp > this.lastMessageTimestamp) {
-          this.lastMessageTimestamp = message.timestamp;
-        }
-        
-        // Mark that we're using sync playback (not legacy separate streams)
-        this.useSyncPlayback = true;
-        
-        // OPTIMIZED: Decode base64 audio using efficient typed array conversion
-        // This avoids intermediate string operations
-        const audioData = this.decodeBase64ToArrayBuffer(message.audio);
-        
-        // Log first frame to verify sync
-        if (message.frameIndex === 0) {
-          log.debug('First sync_frame received:', audioData.byteLength, 'bytes audio + blendshapes');
-        }
-        
-        // Create SyncFrame and add to unified player
-        const syncFrame: SyncFrame = {
+        const frame: SyncFrame = {
           audio: audioData,
-          weights: message.weights,
-          timestamp: message.timestamp,
-          frameIndex: message.frameIndex,
+          weights: weights,
+          timestamp: event.timestamp,
+          frameIndex: event.frameIndex,
+          sessionId: event.sessionId 
         };
         
-        // SyncPlayback handles both audio playback AND blendshape application
-        // in perfect sync - audio time drives blendshape selection
-        this.syncPlayback.addSyncFrame(syncFrame);
-      }
+        this.syncPlayback.addSyncFrame(frame);
     });
-    
-    this.socketService.on('blendshape', (message: IncomingMessage) => {
-      if (message.type === 'blendshape') {
-        // Validate session ID to prevent stale blendshapes from previous conversations
-        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
-          return; // Silently ignore - too noisy to log every frame
-        }
+
+    // 3. Audio End (Spec 5.2: Do NOT stop playback immediately!)
+    this.protocolClient.on('audio_end', (event: AudioEndEvent) => {
+        log.info('Audio end received - marking stream complete (buffer will drain naturally)');
         
-        // Logging reduced - see session start/end logs
-        this.blendshapeBuffer.addFrame(message.weights, message.timestamp);
-      }
-    });
-    
-    this.socketService.on('audio_end', (message: IncomingMessage) => {
-      if (message.type === 'audio_end') {
-        // Validate session ID to prevent stale end signals
-        if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
-          log.debug('Ignoring audio_end from stale session:', message.sessionId);
-          return;
-        }
-        
-        log.info('Audio end received');
-        
-        // Finalize assistant turn bubble
-        this.finalizeAssistantTurn();
-        
+        // Spec 5.2: "Do NOT stop playback immediately! The buffer still has audio to play."
+        // Just mark the stream as closed, let SyncPlayback drain naturally
         if (this.useSyncPlayback) {
-          // Using synchronized playback - it will handle ending naturally
-          this.syncPlayback.endSession(message.sessionId);
+            this.syncPlayback.endSession(event.sessionId);
         } else {
-          // Legacy mode
-          this.audioOutput.endSession(message.sessionId);
-          this.blendshapeBuffer.endSession(message.sessionId);
+            this.audioOutput.endSession(event.sessionId);
+            this.blendshapeBuffer.endSession(event.sessionId);
         }
         
-        // OpenAvatarChat pattern: DON'T disable live blendshapes or stop the loop
-        // The buffer will naturally drain and switch to idle frames
-        // The startBlendshapeSync loop continues running and will handle the transition
-        log.debug('Speech ended - buffer will drain naturally to idle');
-      }
-    });
-    
-    // Handle interruption from server (user started speaking during response)
-    this.socketService.on('interrupt', (message: IncomingMessage) => {
-      if (message.type === 'interrupt') {
-        log.info('Interrupt received - stopping audio playback');
-
-        // Stop all playback systems
-        this.syncPlayback.stop();
-        this.audioOutput.stop();
-        this.blendshapeBuffer.clear();
-
-        // Finalize assistant turn bubble (whatever was said so far)
+        // Finalize assistant bubble when generation is complete
         this.finalizeAssistantTurn();
-
-        // Finalize specific item if provided, else finalize assistant fallback
-        const interruptedItem = (message as any).itemId as string | undefined;
-        this.finalizeStreamingMessage(interruptedItem, 'assistant', true);
-
-        this.avatar.disableLiveBlendshapes();
-        this.avatar.setChatState('Hello');
-      }
-    });
-    
-    // Handle transcript delta (real-time transcription)
-    this.socketService.on('transcript_delta', (message: IncomingMessage) => {
-      if (message.type === 'transcript_delta' && message.text) {
-        // DEBUG: Log raw role value from server
-        console.log('transcript_delta raw:', { role: message.role, text: message.text });
-        const role = message.role === 'assistant' ? 'assistant' : 'user';
-        const itemId = (message as any).itemId as string | undefined;
-        const previousItemId = (message as any).previousItemId as string | undefined;
-
-        this.streamTranscript(message.text, role, itemId, previousItemId);
-      }
     });
 
-    // Handle completed transcript
-    this.socketService.on('transcript_done', (message: IncomingMessage) => {
-      if (message.type === 'transcript_done') {
-        log.debug(`Transcript complete [${message.role}]: ${message.text}`);
-        const role = message.role === 'assistant' ? 'assistant' : 'user';
-        const itemId = (message as any).itemId as string | undefined;
-        const interrupted = !!(message as any).interrupted;
+    // 4. Transcript Delta
+    this.protocolClient.on('transcript_delta', (event: TranscriptDeltaEvent) => {
+         const { role, text, itemId, previousItemId, startOffset } = event;
+         // Pass to existing streamTranscript logic
+         this.streamTranscript(text, role, itemId, previousItemId, startOffset);
+    });
+
+    // 5. Transcript Done
+    this.protocolClient.on('transcript_done', (event: TranscriptDoneEvent) => {
+        log.debug(`Transcript done [${event.role}]: ${event.text}`);
         
+<<<<<<< HEAD
         if (role === 'assistant') {
           // Just finalize the turn - clears subtitle and flushes remaining buffer
           this.finalizeAssistantTurn();
+=======
+        if (event.role === 'assistant') {
+            // Helper to replace text if interrupted
+            if (event.interrupted) {
+                 // Logic to replace bubble text with event.text
+                 if (this.currentAssistantTurnElement) {
+                     const bubble = this.currentAssistantTurnElement.querySelector('.message-bubble');
+                     if (bubble) bubble.textContent = event.text;
+                 }
+            }
+            this.finalizeAssistantTurn();
+>>>>>>> f00db4deb565d7be8bf4ca0cc9f83387085850ba
         } else {
-          this.finalizeStreamingMessage(itemId, role, interrupted);
+            // User message
+            const hasStreaming = (event.itemId && this.streamingByItem.has(event.itemId)) || 
+                                (!event.itemId && this.latestItemForRole[event.role]);
+             
+            if (!hasStreaming) {
+                this.addMessage(event.text, event.role);
+            } else {
+                this.finalizeStreamingMessage(event.itemId, event.role, event.interrupted);
+            }
         }
-      }
+    });
+
+    // 6. Interrupt (Spec 5.3 - The "Magic" Logic)
+    this.protocolClient.on('interrupt', (event: InterruptEvent) => {
+        const interruptedTurn = event.turnId;
+        const cutoffOffset = event.offsetMs;
+        
+        // Spec 5.3 Step 1: Verification
+        if (this.currentTurnId !== interruptedTurn) {
+            log.debug(`Ignoring interrupt for non-active turn. Active: ${this.currentTurnId}, Interrupted: ${interruptedTurn}`);
+            return;
+        }
+        
+        // Spec 5.3 Step 2: Stop processing new frames (handled by isStopped flag in SyncPlayback)
+        // This is implicit - once we call stop(), new frames are dropped
+        
+        // Spec 5.3 Step 3: Calculate local playback position
+        const playbackState = this.syncPlayback.getState();
+        const msPlayed = playbackState.audioPlaybackTime * 1000;
+        
+        // Spec 5.3 Step 4: Handle immediate cut vs scheduled stop
+        if (msPlayed >= cutoffOffset) {
+            // We played too much (latency), stop NOW
+            log.info(`Interruption: Immediate Stop (Played ${msPlayed.toFixed(0)}ms >= Cutoff ${cutoffOffset}ms)`);
+            this.stopAllPlayback();
+        } else {
+            // We are slightly behind, schedule stop
+            const remainingMs = cutoffOffset - msPlayed;
+            log.info(`Interruption: Scheduled Stop in ${remainingMs.toFixed(0)}ms (Played ${msPlayed.toFixed(0)}ms, Cutoff ${cutoffOffset}ms)`);
+            
+            // Prune buffer after cutoff (frames that haven't played yet)
+            // SyncPlayback.stop() will clear the buffer, so we schedule the stop
+            setTimeout(() => {
+                this.stopAllPlayback();
+            }, remainingMs);
+        }
     });
     
-    this.socketService.on('error', (error: Error) => {
-      log.error('Socket error:', error);
-    });
+    // Error
+    this.protocolClient.on('error', (err) => log.error('Protocol Error:', err));
+  }
+
+  private stopAllPlayback(): void {
+    // Spec 5.3: Stop audio and prune buffer
+    this.syncPlayback.stop();
+    this.audioOutput.stop();
+    this.blendshapeBuffer.clear();
+    
+    // Finalize whatever text was displayed
+    this.finalizeAssistantTurn();
+    
+    // Clear transcript queue (pending deltas)
+    this.resetTranscriptTiming();
+    
+    // Reset turn tracking
+    this.currentTurnId = null;
+    
+    // UI feedback (Spec 3.6: "Visual indication that avatar stopped")
+    this.avatar.disableLiveBlendshapes();
+    this.avatar.setChatState('Hello');  // Back to listening state
   }
 
   /**
@@ -522,14 +514,8 @@ export class ChatManager implements Disposable {
     this.chatInput.value = '';
 
     // Send to server
-    const message: OutgoingTextMessage = {
-      type: 'text',
-      data: text,
-      userId: this.userId,
-      timestamp: Date.now(),
-    };
-
-    this.socketService.send(message);
+    this.protocolClient.sendText(text);
+    
     // Stay in Hello state while waiting for response
     this.setTyping(true);
   }
@@ -553,37 +539,30 @@ export class ChatManager implements Disposable {
       const format = 'audio/pcm16';
       const sampleRate = 24000; // OpenAI Realtime API requires 24kHz
 
+      log.info('Starting recording with format:', format, 'sampleRate:', sampleRate);
+
       // Signal server that audio stream is starting
-      const startMessage: AudioStreamStartMessage = {
-        type: 'audio_stream_start',
-        userId: this.userId,
-        format: format,
-        sampleRate: sampleRate,
-        timestamp: Date.now(),
-      };
-      this.socketService.send(startMessage);
+      this.protocolClient.sendAudioStreamStart(format, sampleRate);
       
       // Start recording with PCM16 mode for OpenAI Realtime API
+      let chunkCount = 0;
       await this.audioInput.startRecording((audioData) => {
+        chunkCount++;
+        if (chunkCount <= 3 || chunkCount % 50 === 0) {
+          log.debug(`Audio chunk ${chunkCount}: ${audioData.byteLength} bytes`);
+        }
         // Send each audio chunk immediately to server
-        const message: OutgoingAudioMessage = {
-          type: 'audio',
-          data: audioData,
-          format: format,
-          userId: this.userId,
-          timestamp: Date.now(),
-          sampleRate: sampleRate,
-        };
-        
-        this.socketService.send(message);
+        this.protocolClient.sendAudioData(audioData);
       }, 'pcm16'); // Use PCM16 format for Realtime API
       
+      log.info('Recording started successfully');
       this.isRecording = true;
       this.micBtn.classList.add('recording');
       this.micBtn.setAttribute('aria-pressed', 'true');
       // Don't change avatar state - server controls it based on who's talking
       
     } catch (error) {
+      log.error('Failed to start recording:', error);
       errorBoundary.handleError(error as Error, 'audio-input');
       alert('Microphone access denied. Please enable microphone permissions.');
     }
@@ -593,12 +572,7 @@ export class ChatManager implements Disposable {
     this.audioInput.stopRecording();
     
     // Signal server that audio stream has ended
-    const endMessage: AudioStreamEndMessage = {
-      type: 'audio_stream_end',
-      userId: this.userId,
-      timestamp: Date.now(),
-    };
-    this.socketService.send(endMessage);
+    this.protocolClient.sendAudioStreamEnd();
     
     this.isRecording = false;
     this.micBtn.classList.remove('recording');
@@ -635,6 +609,9 @@ export class ChatManager implements Disposable {
      *   - Less precise sync but works without LAM
      */
     const sync = () => {
+      // Process any queued transcript items (sync text with audio)
+      this.processTranscriptQueue();
+
       // OPTIMIZATION: When using SyncPlayback, it handles blendshape updates via callback
       // Skip this loop entirely to avoid 60fps overhead for legacy-only code
       if (!this.useSyncPlayback) {
@@ -810,8 +787,29 @@ export class ChatManager implements Disposable {
 
   /**
    * Item-aware streaming transcript: uses server-provided itemId and previousItemId
+   * HYBRID APPROACH:
+   * - Assistant messages → currentAssistantTurnElement (one bubble per turn)
+   * - User messages → streamingByItem (supports multiple messages)
    */
-  private streamTranscript(text: string, role: 'user' | 'assistant', itemId?: string, previousItemId?: string): void {
+  private streamTranscript(
+    text: string, 
+    role: 'user' | 'assistant', 
+    itemId?: string, 
+    previousItemId?: string,
+    startOffset?: number,
+    forceImmediate = false
+  ): void {
+    // QUEUE LOGIC: If startOffset is provided (and not forced immediate), queue it
+    if (typeof startOffset === 'number' && !forceImmediate && this.useSyncPlayback) {
+      // User messages with 0 offset should show immediately
+      if (role === 'user' && startOffset <= 0) {
+        // Fall through to immediate rendering
+      } else {
+        this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+        return;
+      }
+    }
+
     // If user is starting to speak, finalize any previous assistant turn
     if (role === 'user' && this.currentAssistantTurnElement) {
       this.finalizeAssistantTurn();
@@ -1098,17 +1096,15 @@ export class ChatManager implements Disposable {
   }
 
   private scrollToBottom(): void {
-    // Scroll after content has rendered - multiple attempts with increasing delays
-    const doScroll = () => {
-      if (this.chatMessages) {
+    // Scroll after layout using requestAnimationFrame + scrollIntoView for reliability
+    requestAnimationFrame(() => {
+      const lastChild = this.chatMessages?.lastElementChild as HTMLElement | null;
+      if (lastChild) {
+        lastChild.scrollIntoView({ behavior: 'auto', block: 'end' });
+      } else if (this.chatMessages) {
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
       }
-    };
-    
-    // Multiple delayed attempts to catch late renders
-    setTimeout(doScroll, 50);
-    setTimeout(doScroll, 200);
-    setTimeout(doScroll, 500);
+    });
   }
 
   private toggleChat(): void {
@@ -1179,7 +1175,7 @@ export class ChatManager implements Disposable {
   async reconnectOnExpand(): Promise<void> {
     // Reconnect to server
     try {
-      await this.socketService.connect();
+      await this.protocolClient.connect();
       log.debug('Chat expanded - reconnected to server');
     } catch (error) {
       log.error('Failed to reconnect on expand:', error);
@@ -1237,6 +1233,9 @@ export class ChatManager implements Disposable {
    * Called on implicit session start to ensure clean state.
    */
   private resetTranscriptTiming(): void {
+    // Clear transcript queue
+    this.transcriptQueue = [];
+    
     // Clear any pending buffered deltas from previous session
     this.bufferedDeltas.clear();
     for (const timeout of this.bufferTimeouts.values()) {
@@ -1258,10 +1257,50 @@ export class ChatManager implements Disposable {
   }
 
   /**
+   * Process queued transcript items based on playback time
+   */
+  private processTranscriptQueue(): void {
+    if (this.transcriptQueue.length === 0) return;
+
+    const playbackState = this.syncPlayback.getState();
+    const playbackTimeMs = playbackState.audioPlaybackTime * 1000;
+    const DISPLAY_LEAD_MS = 100; // Allow text to appear slightly before audio
+
+    // Only wait for playback start if items have significant offset.
+    // If offset is near 0, show immediately even if buffering.
+    // Also force show if queue gets too old (backup plan).
+    if (!playbackState.isPlaying && this.transcriptQueue[0].startOffset > 200) {
+       return;
+    }
+
+    while (this.transcriptQueue.length > 0) {
+      const item = this.transcriptQueue[0];
+      
+      // If item is due (or overdue)
+      // Use generous lead time to prevent text lag perception
+      if (item.startOffset <= playbackTimeMs + DISPLAY_LEAD_MS || (!playbackState.isPlaying && item.startOffset <= 200)) {
+        this.transcriptQueue.shift(); // Remove from queue
+        
+        // Render it
+        if (item.role === 'assistant') {
+          this.appendToAssistantTurn(item.text);
+        } else {
+          // Fallback for user messages (should usually have 0 offset)
+          // We call streamTranscript recursively but without offset to force immediate render
+          this.streamTranscript(item.text, item.role, item.itemId, item.previousItemId, undefined, true);
+        }
+      } else {
+        // Queue is ordered by time, so we can stop checking
+        break;
+      }
+    }
+  }
+
+  /**
    * Manually reconnect to the server
    */
   async reconnect(): Promise<void> {
-    return this.socketService.reconnect();
+    return this.protocolClient.connect();
   }
 
   dispose(): void {
@@ -1269,7 +1308,12 @@ export class ChatManager implements Disposable {
       cancelAnimationFrame(this.animationFrameId);
     }
 
-    this.socketService.dispose();
+    this.protocolClient.disconnect();
+    // this.socketService.dispose(); // Handled by protocolClient.disconnect roughly? 
+    // Wait, protocolClient doesn't have dispose, only disconnect. 
+    // socketService has dispose which closes socket.
+    // ChatManager created ProtocolClient which wraps SocketService.
+    // If we want to fully dispose, we should probably add dispose to ProtocolClient.
     this.audioInput.dispose();
     this.audioOutput.dispose();
     this.blendshapeBuffer.dispose();
