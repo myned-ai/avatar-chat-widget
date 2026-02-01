@@ -288,7 +288,7 @@ class AvatarChatElement extends HTMLElement {
       // Get shadow DOM elements for ChatManager
       const chatMessages = this.shadow.getElementById('chatMessages');
       const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
-      const sendBtn = this.shadow.getElementById('sendBtn') as HTMLButtonElement | null;
+      const sendBtn = this.shadow.getElementById('sendBtn') as HTMLButtonElement | undefined;
       const micBtn = this.shadow.getElementById('micBtn') as HTMLButtonElement;
       const avatarSubtitles = this.shadow.getElementById('avatarSubtitles') as HTMLElement;
 
@@ -301,7 +301,7 @@ class AvatarChatElement extends HTMLElement {
         shadowRoot: this.shadow,
         chatMessages,
         chatInput,
-        sendBtn,
+        sendBtn: sendBtn || undefined,
         micBtn,
         onConnectionChange: (connected) => {
           this._isConnected = connected;
@@ -535,6 +535,15 @@ class AvatarChatElement extends HTMLElement {
           widgetRoot.classList.remove('expanded');
           expandBtn.setAttribute('aria-label', 'Expand chat');
           expandBtn.setAttribute('title', 'Expand');
+        }
+        
+        // Update view mode button tooltip
+        if (newState === 'text-focus') {
+          viewModeBtn.setAttribute('title', 'Avatar View');
+          viewModeBtn.setAttribute('aria-label', 'Switch to Avatar View');
+        } else {
+          viewModeBtn.setAttribute('title', 'Chat View');
+          viewModeBtn.setAttribute('aria-label', 'Switch to Chat View');
         }
         
         this.drawerController.setState(newState);

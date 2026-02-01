@@ -36,8 +36,8 @@ const AVATAR_PADDING = 56;  // matches header height
 // Text-focus chat height - full height
 const CHAT_HEIGHT_TEXT_FOCUS = 394; // 540 - 56 header - 90 input = 394px for chat
 
-// Avatar-focus content height (smaller size)
-const AVATAR_FOCUS_CONTENT = 260;
+// Avatar-focus content height (smaller size - reduced for less bottom whitespace)
+const AVATAR_FOCUS_CONTENT = 224;
 
 // State configuration - avatar height includes padding to extend behind header
 const STATE_CONFIG: Record<DrawerState, { avatar: number; chat: number; widgetHeight: number }> = {
@@ -48,11 +48,11 @@ const STATE_CONFIG: Record<DrawerState, { avatar: number; chat: number; widgetHe
     widgetHeight: FULL_WIDGET_HEIGHT
   },
   'avatar-focus': { 
-    // Smaller height: header + 260 + input = 406px
-    // Avatar fills the content area: 260px + 56px padding = 316px
-    avatar: AVATAR_FOCUS_CONTENT + AVATAR_PADDING,  // 260 + 56 = 316px (extends behind header)
+    // Smaller height: header + 224 + input = 370px
+    // Avatar fills the content area: 224px + 56px padding = 280px
+    avatar: AVATAR_FOCUS_CONTENT + AVATAR_PADDING,  // 224 + 56 = 280px (extends behind header)
     chat: 0,
-    // Widget: 406px
+    // Widget: 370px
     widgetHeight: HEADER_HEIGHT + AVATAR_FOCUS_CONTENT + INPUT_HEIGHT
   },
 };
