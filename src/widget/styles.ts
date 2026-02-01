@@ -803,6 +803,12 @@ export const WIDGET_STYLES = `
   z-index: 100; /* Above everything */
 }
 
+/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
+[data-drawer-state="text-focus"] .input-layer {
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+
 /* Upward gradient to soften the hard edge where footer meets chat - only in text-focus mode */
 [data-drawer-state="text-focus"] .input-layer::before {
   content: '';
@@ -895,6 +901,12 @@ export const WIDGET_STYLES = `
   padding: 16px;
   background: var(--bg-color);
   flex-shrink: 0;
+}
+
+/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
+[data-drawer-state="text-focus"] .chat-input-area {
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
 }
 
 .chat-input-wrapper {
