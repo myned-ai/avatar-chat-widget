@@ -6,7 +6,6 @@ import { logger } from '../utils/Logger';
 import { CONFIG } from '../config';
 
 const log = logger.scope('SocketService');
-import { BinaryProtocol } from '../utils/BinaryProtocol';
 import { AuthService } from './AuthService';
 import type { IncomingMessage, OutgoingMessage } from '../types/messages';
 import type { Disposable, ConnectionState } from '../types/common';
@@ -21,7 +20,6 @@ export class SocketService extends EventEmitter implements Disposable {
   private readonly maxQueueSize = 100;
   private readonly maxReconnectAttempts = 10;
   private isIntentionallyClosed = false;
-  private useBinaryProtocol = false; // Disable binary protocol - backend expects JSON
   private authService: AuthService;
   private url: string;
 
@@ -132,20 +130,15 @@ export class SocketService extends EventEmitter implements Disposable {
       let message: IncomingMessage;
 
       if (event.data instanceof ArrayBuffer) {
-        // Binary protocol message
-        if (this.useBinaryProtocol) {
-          message = BinaryProtocol.decode(event.data);
-        } else {
-          // Fallback: treat as raw audio data
-          message = {
-            type: 'audio_chunk',
-            data: event.data,
-            timestamp: Date.now(),
-            sessionId: '',
-          };
-        }
+        // Server shouldn't send binary, but handle it as raw audio if it does
+        message = {
+          type: 'audio_chunk',
+          data: event.data,
+          timestamp: Date.now(),
+          sessionId: '',
+        };
       } else {
-        // JSON message (fallback for non-binary messages)
+        // JSON message (standard protocol)
         message = JSON.parse(event.data);
       }
 
@@ -267,35 +260,20 @@ export class SocketService extends EventEmitter implements Disposable {
     }
 
     try {
-      if (this.useBinaryProtocol) {
-        // Use binary protocol (33% bandwidth savings vs base64)
-        const binaryData = BinaryProtocol.encode(message);
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
-        this.ws!.send(binaryData);
+      // Server only accepts JSON messages (uses receive_json())
+      // Audio data should already be base64 encoded by caller
+      const jsonStr = JSON.stringify(message);
+      
+      // Log outgoing messages (truncate audio data for readability)
+      if (message.type === 'audio') {
+        const dataLen = typeof message.data === 'string' ? message.data.length : 0;
+        log.debug(`Sending: {"type":"audio","data":"<${dataLen} base64 chars>"}`);
       } else {
-        // Fallback: JSON with base64 encoding for audio
-        if ((message.type === 'audio_input' || message.type === 'audio') && message.data instanceof ArrayBuffer) {
-          // Convert audio ArrayBuffer to base64 for JSON transmission
-          const bytes = new Uint8Array(message.data);
-          let binary = '';
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64Data = btoa(binary);
-
-          // Send as JSON with base64-encoded audio
-          const jsonMessage = {
-            ...message,
-            data: base64Data,
-          };
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
-          this.ws!.send(JSON.stringify(jsonMessage));
-        } else {
-          // Send JSON data
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
-          this.ws!.send(JSON.stringify(message));
-        }
+        log.debug(`Sending: ${jsonStr}`);
       }
+      
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- isConnected() check ensures ws exists
+      this.ws!.send(jsonStr);
     } catch (error) {
       errorBoundary.handleError(error as Error, 'websocket');
       this.queueMessage(message);

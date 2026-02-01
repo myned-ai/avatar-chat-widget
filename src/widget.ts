@@ -288,7 +288,6 @@ class AvatarChatElement extends HTMLElement {
       // Get shadow DOM elements for ChatManager
       const chatMessages = this.shadow.getElementById('chatMessages');
       const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
-      const sendBtn = this.shadow.getElementById('sendBtn') as HTMLButtonElement | undefined;
       const micBtn = this.shadow.getElementById('micBtn') as HTMLButtonElement;
       const avatarSubtitles = this.shadow.getElementById('avatarSubtitles') as HTMLElement;
 
@@ -301,7 +300,6 @@ class AvatarChatElement extends HTMLElement {
         shadowRoot: this.shadow,
         chatMessages,
         chatInput,
-        sendBtn: sendBtn || undefined,
         micBtn,
         onConnectionChange: (connected) => {
           this._isConnected = connected;
@@ -317,17 +315,29 @@ class AvatarChatElement extends HTMLElement {
           this.config.onError?.(err);
         },
         onSubtitleUpdate: (text, role) => {
-          // Update subtitle element with current text (replaces content)
-          if (avatarSubtitles) {
-            // Trigger fade-in animation on new content
-            if (text && !avatarSubtitles.classList.contains('visible')) {
-              avatarSubtitles.classList.add('visible');
-            } else if (!text) {
-              avatarSubtitles.classList.remove('visible');
+          // User messages: show directly
+          if (role === 'user' && avatarSubtitles) {
+            if (text) {
+              avatarSubtitles.classList.add('visible', 'user-speaking');
+              avatarSubtitles.textContent = text;
+            } else {
+              avatarSubtitles.classList.remove('visible', 'user-speaking');
+              avatarSubtitles.textContent = '';
             }
+          }
+          
+          // Assistant messages: Simple subtitle display (no karaoke)
+          if (role === 'assistant' && avatarSubtitles) {
+            if (!text) {
+              // Turn ended - clear subtitle
+              avatarSubtitles.classList.remove('visible');
+              avatarSubtitles.textContent = '';
+              return;
+            }
+            
+            avatarSubtitles.classList.add('visible');
+            avatarSubtitles.classList.remove('user-speaking');
             avatarSubtitles.textContent = text;
-            // Apply different styling for user vs assistant
-            avatarSubtitles.classList.toggle('user-speaking', role === 'user');
           }
         },
       });
@@ -377,7 +387,6 @@ class AvatarChatElement extends HTMLElement {
     // Quick Replies Logic
     const quickReplies = this.shadow.getElementById('quickReplies');
     const avatarSuggestions = this.shadow.getElementById('avatarSuggestions');
-    const sendBtn = this.shadow.getElementById('sendBtn');
     const micBtn = this.shadow.getElementById('micBtn');
     
     // Populate suggestion chips from config (both in chat and avatar sections)

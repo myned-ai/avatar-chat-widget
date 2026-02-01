@@ -39,7 +39,6 @@ export interface ChatManagerOptions {
   /** Pre-selected DOM elements (for Shadow DOM usage) */
   chatMessages?: HTMLElement;
   chatInput?: HTMLInputElement;
-  sendBtn?: HTMLButtonElement;
   micBtn?: HTMLButtonElement;
   /** Callbacks */
   onConnectionChange?: (connected: boolean) => void;
@@ -67,7 +66,6 @@ export class ChatManager implements Disposable {
   // UI Elements
   private chatMessages: HTMLElement;
   private chatInput: HTMLInputElement;
-  private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
   private typingIndicator: HTMLElement | null = null;
   private typingStartTime: number = 0;
@@ -101,6 +99,16 @@ export class ChatManager implements Disposable {
   // Current assistant turn element - append all parts to same bubble
   private currentAssistantTurnElement: HTMLElement | null = null;
   private currentAssistantTurnText: string = '';
+  
+  // Subtitle state: two-array design
+  // currentChunk = words being displayed NOW
+  // nextChunk = words waiting for next display
+  private subtitleCurrentChunk: string[] = [];  // Currently displayed
+  private subtitleNextChunk: string[] = [];     // Waiting for next display
+  private subtitleSpokenInChunk: number = 0;    // How many of currentChunk have been spoken
+  private subtitleChunkLocked: boolean = false; // When true, stop appending to currentChunk
+  private readonly SUBTITLE_MIN_WORDS = 5;
+  private readonly SUBTITLE_MAX_WORDS = 7;
   
   // Transcript Queue for synced display
   private transcriptQueue: Array<{
@@ -138,6 +146,9 @@ export class ChatManager implements Disposable {
       this.avatar.disableLiveBlendshapes();
       this.useSyncPlayback = false;
 
+      // Show any remaining subtitle words before clearing
+      this.showRemainingSubtitle();
+
       // Flush any remaining transcript items to ensure full sentence is shown
       while (this.transcriptQueue.length > 0) {
         const item = this.transcriptQueue.shift();
@@ -157,7 +168,6 @@ export class ChatManager implements Disposable {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Elements exist in template
     this.chatMessages = options.chatMessages || root.getElementById('chatMessages')!;
     this.chatInput = (options.chatInput || root.getElementById('chatInput')) as HTMLInputElement;
-    this.sendBtn = (options.sendBtn || root.getElementById('sendBtn')) as HTMLButtonElement;
     this.micBtn = (options.micBtn || root.getElementById('micBtn')) as HTMLButtonElement;
     this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement;
     
@@ -221,7 +231,7 @@ export class ChatManager implements Disposable {
       this.avatar.setChatState('Idle');
       
       // Request microphone permission (optional, on-demand)
-      // await this.audioInput.requestPermission();
+      await this.audioInput.requestPermission();
       
     } catch (error) {
       errorBoundary.handleError(error as Error, 'chat-manager');
@@ -233,9 +243,6 @@ export class ChatManager implements Disposable {
   private setupEventListeners(): void {
     const root = this.options.shadowRoot || document;
     
-    // Send button (optional - may not exist if users use Enter to send)
-    this.sendBtn?.addEventListener('click', () => this.sendTextMessage());
-    
     // Enter key to send
     this.chatInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
@@ -244,7 +251,11 @@ export class ChatManager implements Disposable {
     });
     
     // Microphone button
-    this.micBtn.addEventListener('click', () => this.toggleVoiceInput());
+    log.info('Setting up mic button click listener', this.micBtn);
+    this.micBtn.addEventListener('click', () => {
+      log.info('Mic button clicked!');
+      this.toggleVoiceInput();
+    });
     
     // Chat header toggle (only for standalone mode, widget handles its own)
     const chatHeader = root.querySelector('.chat-header');
@@ -299,6 +310,11 @@ export class ChatManager implements Disposable {
         this.currentTurnId = event.turnId;
         this.currentSessionId = event.sessionId;
         this.turnStartTime = Date.now();  // Reset tracking
+        
+        // Reset transcript state for new turn (fixes follow-up question bugs)
+        this.transcriptQueue = [];
+        // Note: Don't reset currentAssistantTurnElement/Text here - 
+        // finalizeAssistantTurn() handles that when previous turn ends
         
         // Spec 5.2: audio_buffer.clear() - Start fresh session clears buffers
         this.syncPlayback.startSession(event.sessionId, event.sampleRate);
@@ -364,8 +380,8 @@ export class ChatManager implements Disposable {
             this.blendshapeBuffer.endSession(event.sessionId);
         }
         
-        // Finalize assistant bubble when generation is complete
-        this.finalizeAssistantTurn();
+        // Note: Don't finalize here - transcript_done will handle it
+        // This prevents double-finalize causing two bubbles
     });
 
     // 4. Transcript Delta
@@ -379,11 +395,6 @@ export class ChatManager implements Disposable {
     this.protocolClient.on('transcript_done', (event: TranscriptDoneEvent) => {
         log.debug(`Transcript done [${event.role}]: ${event.text}`);
         
-<<<<<<< HEAD
-        if (role === 'assistant') {
-          // Just finalize the turn - clears subtitle and flushes remaining buffer
-          this.finalizeAssistantTurn();
-=======
         if (event.role === 'assistant') {
             // Helper to replace text if interrupted
             if (event.interrupted) {
@@ -394,7 +405,6 @@ export class ChatManager implements Disposable {
                  }
             }
             this.finalizeAssistantTurn();
->>>>>>> f00db4deb565d7be8bf4ca0cc9f83387085850ba
         } else {
             // User message
             const hasStreaming = (event.itemId && this.streamingByItem.has(event.itemId)) || 
@@ -521,37 +531,39 @@ export class ChatManager implements Disposable {
   }
 
   private async toggleVoiceInput(): Promise<void> {
+    log.info('toggleVoiceInput called, isRecording:', this.isRecording);
+    
     // Transition to Hello when user starts voice input
     if (!this.isRecording) {
       this.avatar.setChatState('Hello');
     }
     
     if (this.isRecording) {
+      log.info('Stopping recording...');
       this.stopRecording();
     } else {
+      log.info('Starting recording...');
       await this.startRecording();
     }
   }
 
   private async startRecording(): Promise<void> {
     try {
-      // Use PCM16 format for OpenAI Realtime API
-      const format = 'audio/pcm16';
-      const sampleRate = 24000; // OpenAI Realtime API requires 24kHz
+      log.info('Starting recording (PCM16 24kHz)');
+      log.info('WebSocket connected:', this.socketService.isConnected());
 
-      log.info('Starting recording with format:', format, 'sampleRate:', sampleRate);
-
-      // Signal server that audio stream is starting
-      this.protocolClient.sendAudioStreamStart(format, sampleRate);
+      // Signal server that audio stream is starting (spec 4.1)
+      this.protocolClient.sendAudioStreamStart();
+      log.info('Sent audio_stream_start to server');
       
       // Start recording with PCM16 mode for OpenAI Realtime API
       let chunkCount = 0;
       await this.audioInput.startRecording((audioData) => {
         chunkCount++;
-        if (chunkCount <= 3 || chunkCount % 50 === 0) {
-          log.debug(`Audio chunk ${chunkCount}: ${audioData.byteLength} bytes`);
+        if (chunkCount <= 5 || chunkCount % 50 === 0) {
+          log.info(`Audio chunk ${chunkCount}: ${audioData.byteLength} bytes`);
         }
-        // Send each audio chunk immediately to server
+        // Send raw binary audio to server (spec 4.2 preferred method)
         this.protocolClient.sendAudioData(audioData);
       }, 'pcm16'); // Use PCM16 format for Realtime API
       
@@ -671,19 +683,116 @@ export class ChatManager implements Disposable {
       this.currentAssistantTurnText = text;
       this.scrollToBottom();
     } else {
-      // Append to existing bubble
+      // Append to existing bubble - add space between words, but not before punctuation
       const bubbleEl = this.currentAssistantTurnElement.querySelector('.message-bubble');
       if (bubbleEl) {
-        this.currentAssistantTurnText += ' ' + text;
+        // No space before punctuation or contractions ('t 's 're etc)
+        const needsSpace = !/^[.,!?;:'’"\-)\]}>…]/.test(text);
+        const separator = needsSpace ? ' ' : '';
+        this.currentAssistantTurnText += separator + text;
         bubbleEl.textContent = this.currentAssistantTurnText;
         this.scrollToBottom();
       }
+    }
+    
+    // SUBTITLE: Word SPOKEN
+    // Only count and swap when chunk is LOCKED (done building)
+    if (!this.subtitleChunkLocked) {
+      // Still building - don't count spoken words yet
+      return;
+    }
+    
+    this.subtitleSpokenInChunk++;
+    
+    // When all words in current chunk are spoken, build next chunk
+    if (this.subtitleSpokenInChunk >= this.subtitleCurrentChunk.length && this.subtitleCurrentChunk.length > 0) {
+      // Build new current chunk from nextChunk (MAX 7 words, smart break)
+      this.buildNextChunk();
+    }
+  }
+  
+  /**
+   * Build new current chunk from nextChunk (respects 5-7 word limit)
+   */
+  private buildNextChunk(): void {
+    // Reset state
+    this.subtitleCurrentChunk = [];
+    this.subtitleSpokenInChunk = 0;
+    this.subtitleChunkLocked = false;
+    
+    // Take words from nextChunk, respecting limits
+    while (this.subtitleNextChunk.length > 0 && this.subtitleCurrentChunk.length < this.SUBTITLE_MAX_WORDS) {
+      const word = this.subtitleNextChunk.shift()!;
+      this.subtitleCurrentChunk.push(word);
+      
+      // Check if we should stop (natural break point)
+      if (this.shouldLockChunk()) {
+        this.subtitleChunkLocked = true;
+        break;
+      }
+    }
+    
+    // If we hit max without natural break, still lock
+    if (this.subtitleCurrentChunk.length >= this.SUBTITLE_MAX_WORDS) {
+      this.subtitleChunkLocked = true;
+    }
+    
+    // Display new chunk
+    if (this.subtitleCurrentChunk.length > 0) {
+      this.displaySubtitleChunk();
+    }
+  }
+  
+  /**
+   * Display current subtitle chunk
+   */
+  private displaySubtitleChunk(): void {
+    if (this.subtitleCurrentChunk.length > 0) {
+      const text = this.joinWordsSmartly(this.subtitleCurrentChunk);
+      this.options.onSubtitleUpdate?.(text, 'assistant');
+    }
+  }
+  
+  /**
+   * Check if current chunk should be locked (stop appending)
+   */
+  private shouldLockChunk(): boolean {
+    const len = this.subtitleCurrentChunk.length;
+    
+    // Max reached - must lock
+    if (len >= this.SUBTITLE_MAX_WORDS) return true;
+    
+    // Not enough words yet
+    if (len < this.SUBTITLE_MIN_WORDS) return false;
+    
+    // Check for natural break (sentence end)
+    const lastWord = this.subtitleCurrentChunk[len - 1];
+    if (!lastWord) return false;
+    
+    // Don't lock if next word in nextChunk is punctuation
+    const nextWord = this.subtitleNextChunk[0];
+    if (nextWord && /^[.,!?;:''"\-]/.test(nextWord)) {
+      return false;
+    }
+    
+    // Lock on sentence end
+    return /[.!?]$/.test(lastWord);
+  }
+  
+  /**
+   * Show any remaining subtitle words (called when playback ends)
+   */
+  private showRemainingSubtitle(): void {
+    // Combine current and next chunks
+    const all = [...this.subtitleCurrentChunk, ...this.subtitleNextChunk];
+    if (all.length > 0) {
+      const text = this.joinWordsSmartly(all);
+      this.options.onSubtitleUpdate?.(text, 'assistant');
     }
   }
 
   /**
    * Append buffered deltas to the assistant bubble (called every 500ms)
-   * Also updates subtitle with the buffered text
    */
   private appendBufferedToAssistantBubble(): void {
     const buffered = this.bufferedDeltas.get(this.ASSISTANT_TURN_KEY);
@@ -692,9 +801,6 @@ export class ChatManager implements Disposable {
     // Take all buffered text and clear the buffer
     const text = buffered.join('');
     this.bufferedDeltas.set(this.ASSISTANT_TURN_KEY, []);
-
-    // Update subtitle with the buffered chunk (replace, not append)
-    this.options.onSubtitleUpdate?.(text, 'assistant');
 
     // Create or append to the bubble
     if (!this.currentAssistantTurnElement) {
@@ -726,6 +832,7 @@ export class ChatManager implements Disposable {
         this.scrollToBottom();
       }
     }
+    // Note: Subtitle is now updated via MutationObserver in widget.ts
   }
 
   /**
@@ -742,8 +849,12 @@ export class ChatManager implements Disposable {
     this.appendBufferedToAssistantBubble();
     this.bufferedDeltas.delete(this.ASSISTANT_TURN_KEY);
 
-    // Clear subtitle
+    // Clear subtitle and reset subtitle state
     this.options.onSubtitleUpdate?.('', 'assistant');
+    this.subtitleCurrentChunk = [];
+    this.subtitleNextChunk = [];
+    this.subtitleSpokenInChunk = 0;
+    this.subtitleChunkLocked = false;
 
     if (!this.currentAssistantTurnElement) return;
 
@@ -799,13 +910,34 @@ export class ChatManager implements Disposable {
     startOffset?: number,
     forceImmediate = false
   ): void {
-    // QUEUE LOGIC: If startOffset is provided (and not forced immediate), queue it
-    if (typeof startOffset === 'number' && !forceImmediate && this.useSyncPlayback) {
+    // QUEUE LOGIC: If startOffset is provided, always queue it for audio sync
+    // (Previously we checked useSyncPlayback, but that causes a race condition
+    // since sync_frame might arrive after transcript_delta)
+    if (typeof startOffset === 'number' && !forceImmediate) {
       // User messages with 0 offset should show immediately
       if (role === 'user' && startOffset <= 0) {
         // Fall through to immediate rendering
       } else {
         this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+        
+        // SUBTITLE: Word ARRIVED (not spoken yet)
+        if (role === 'assistant') {
+          const word = text.trim();
+          
+          if (this.subtitleChunkLocked) {
+            // Chunk is locked (being spoken) - save for next chunk
+            this.subtitleNextChunk.push(word);
+          } else {
+            // Building current chunk - append and display
+            this.subtitleCurrentChunk.push(word);
+            this.displaySubtitleChunk();
+            
+            // Check if we should lock
+            if (this.shouldLockChunk()) {
+              this.subtitleChunkLocked = true;
+            }
+          }
+        }
         return;
       }
     }
@@ -942,7 +1074,7 @@ export class ChatManager implements Disposable {
     if (role === 'assistant') {
       const buffered = this.bufferedDeltas.get(this.ASSISTANT_TURN_KEY);
       if (buffered && buffered.length) {
-        const text = buffered.join(' ');
+        const text = this.joinWordsSmartly(buffered);
         const msg: ChatMessage = {
           id: `assistant_turn_${Date.now()}`,
           text,
@@ -1254,6 +1386,10 @@ export class ChatManager implements Disposable {
     }
     this.currentAssistantTurnElement = null;
     this.currentAssistantTurnText = '';
+    
+    // Reset subtitle state
+    this.subtitleSpokenWordCount = 0;
+    this.subtitleCurrentChunk = [];
   }
 
   /**
@@ -1266,19 +1402,14 @@ export class ChatManager implements Disposable {
     const playbackTimeMs = playbackState.audioPlaybackTime * 1000;
     const DISPLAY_LEAD_MS = 100; // Allow text to appear slightly before audio
 
-    // Only wait for playback start if items have significant offset.
-    // If offset is near 0, show immediately even if buffering.
-    // Also force show if queue gets too old (backup plan).
-    if (!playbackState.isPlaying && this.transcriptQueue[0].startOffset > 200) {
-       return;
-    }
-
+    // Process items that are due based on playback time
     while (this.transcriptQueue.length > 0) {
       const item = this.transcriptQueue[0];
       
-      // If item is due (or overdue)
-      // Use generous lead time to prevent text lag perception
-      if (item.startOffset <= playbackTimeMs + DISPLAY_LEAD_MS || (!playbackState.isPlaying && item.startOffset <= 200)) {
+      // Item is due if its offset is before or near current playback time
+      const isDue = item.startOffset <= playbackTimeMs + DISPLAY_LEAD_MS;
+      
+      if (isDue) {
         this.transcriptQueue.shift(); // Remove from queue
         
         // Render it
@@ -1286,7 +1417,6 @@ export class ChatManager implements Disposable {
           this.appendToAssistantTurn(item.text);
         } else {
           // Fallback for user messages (should usually have 0 offset)
-          // We call streamTranscript recursively but without offset to force immediate render
           this.streamTranscript(item.text, item.role, item.itemId, item.previousItemId, undefined, true);
         }
       } else {
@@ -1294,6 +1424,43 @@ export class ChatManager implements Disposable {
         break;
       }
     }
+  }
+  
+  /**
+   * Build NEXT subtitle chunk from queue (REPLACES current chunk)
+   * Called only when current chunk is fully spoken through
+   */
+  private buildSubtitleChunkFromQueue(): void {
+    const assistantItems = this.transcriptQueue.filter(item => item.role === 'assistant');
+    
+    if (assistantItems.length === 0) return;
+    
+    // After initial chunk, always use 6 words
+    this.subtitleCurrentChunk = assistantItems
+      .slice(0, this.SUBTITLE_CHUNK_SIZE)
+      .map(item => item.text.trim());
+    
+    if (this.subtitleCurrentChunk.length > 0) {
+      // New chunk starts at position 0
+      const subtitleText = '0|' + this.joinWordsSmartly(this.subtitleCurrentChunk);
+      this.options.onSubtitleUpdate?.(subtitleText, 'assistant');
+    }
+  }
+  
+  /**
+   * Join words with smart spacing - add space between words, but not before punctuation
+   */
+  private joinWordsSmartly(words: string[]): string {
+    if (words.length === 0) return '';
+    
+    let result = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i];
+      // No space before punctuation or contractions ('t 's etc)
+      const needsSpace = !/^[.,!?;:'’"\-)\]}>…]/.test(word);
+      result += needsSpace ? ' ' + word : word;
+    }
+    return result;
   }
 
   /**

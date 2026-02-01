@@ -1,7 +1,7 @@
 import { EventEmitter } from '../utils/EventEmitter';
 import { SocketService } from './SocketService';
 import { logger } from '../utils/Logger';
-import type { OutgoingMessage, AudioStreamStartMessage as LegacyAudioStreamStartMessage, AudioStreamEndMessage, AudioInputMessage, InterruptOutMessage } from '../types/messages';
+import type { OutgoingMessage } from '../types/messages';
 import {
   AudioStartEvent,
   SyncFrameEvent,
@@ -222,67 +222,68 @@ export class AvatarProtocolClient extends EventEmitter {
   // Out-bound Methods (Client -> Server)
   // ------------------------------------------------------------------
 
-  public sendAudioStreamStart(format: 'audio/pcm16' = 'audio/pcm16', sampleRate = 24000) {
-    log.info('Sending audio_stream_start', { format, sampleRate });
-    const msg: LegacyAudioStreamStartMessage = {
+  public sendAudioStreamStart() {
+    log.info('Sending audio_stream_start', { userId: this.userId });
+    // Server only needs type and userId (Spec 4.1)
+    const msg = {
       type: 'audio_stream_start',
-      userId: this.userId,
-      format,
-      sampleRate,
-      timestamp: Date.now()
+      userId: this.userId
     };
-    this.socket.send(msg);
+    this.socket.send(msg as OutgoingMessage);
   }
 
   public sendAudioStreamEnd() {
      log.info('Sending audio_stream_end');
-     const msg: AudioStreamEndMessage = {
-        type: 'audio_stream_end',
-        userId: this.userId,
-        timestamp: Date.now()
+     // Server only needs type (Spec 4.4)
+     const msg = {
+        type: 'audio_stream_end'
      };
-     this.socket.send(msg);
+     this.socket.send(msg as OutgoingMessage);
   }
 
   public sendAudioData(data: ArrayBuffer) {
-    // Spec 4.2: Send audio as type "audio" with base64 data
-    // SocketService will convert ArrayBuffer to base64 automatically
-    const msg: OutgoingMessage = {
+    // Spec 4.2: Server expects ONLY {type: "audio", data: "<base64>"}
+    // Convert ArrayBuffer to base64 here
+    const bytes = new Uint8Array(data);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+    
+    const msg = {
       type: 'audio',
-      data: data,
-      userId: this.userId,
-      timestamp: Date.now(),
-      format: 'audio/pcm16',
-      sampleRate: 24000
-    } as any;  // Cast to any since OutgoingMessage expects OutgoingAudioMessage fields
-    this.socket.send(msg);
+      data: base64Data
+    };
+    this.socket.send(msg as OutgoingMessage);
   }
 
   public sendText(text: string) {
-    const msg: OutgoingMessage = {
+    log.info('Sending text message', { text });
+    // Server expects only {type: "text", data: string} (Spec 4.3)
+    const msg = {
       type: 'text',
-      data: text,
-      userId: this.userId,
-      timestamp: Date.now()
+      data: text
     };
-    this.socket.send(msg);
+    this.socket.send(msg as OutgoingMessage);
   }
 
   public sendInterrupt() {
-    const msg: InterruptOutMessage = {
-      type: 'interrupt',
-      timestamp: Date.now()
+    log.info('Sending interrupt');
+    // Server expects only {type: "interrupt"}
+    const msg = {
+      type: 'interrupt'
     };
-    this.socket.send(msg);
+    this.socket.send(msg as OutgoingMessage);
   }
 
   /**
    * Spec 4.5: Keepalive ping
    */
   public sendPing() {
+    // Server expects only {type: "ping"}
     this.socket.send({
-      type: 'ping',
-      timestamp: Date.now()
+      type: 'ping'
     } as OutgoingMessage);
   }
 

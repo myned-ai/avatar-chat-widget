@@ -59,6 +59,8 @@ export class AudioInput implements Disposable {
     onData: (data: ArrayBuffer) => void,
     format: AudioFormat = 'webm'
   ): Promise<void> {
+    log.info('AudioInput.startRecording called with format:', format);
+    
     if (this.isRecording) {
       log.warn('Already recording');
       return;
@@ -69,8 +71,10 @@ export class AudioInput implements Disposable {
     this.currentFormat = format;
 
     if (format === 'pcm16') {
+      log.info('Starting PCM16 recording...');
       await this.startPCM16Recording(onData);
     } else {
+      log.info('Starting WebM recording...');
       await this.startWebMRecording(onData);
     }
   }

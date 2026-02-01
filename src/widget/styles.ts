@@ -485,6 +485,10 @@ export const WIDGET_STYLES = `
   max-width: 100%;
   width: auto;
   
+  /* Single line with ellipsis fallback */
+  white-space: nowrap;
+  overflow: hidden;
+  
   /* Smooth appearance */
   opacity: 0;
   transition: opacity 0.3s ease;
@@ -540,6 +544,16 @@ export const WIDGET_STYLES = `
 }
 
 .theme-dark .avatar-subtitles.user-speaking {
+  color: #a5a4f3;
+}
+
+/* Karaoke-style highlight for current word being spoken */
+.avatar-subtitles .subtitle-current {
+  color: #4B4ACF;
+  font-weight: 600;
+}
+
+.theme-dark .avatar-subtitles .subtitle-current {
   color: #a5a4f3;
 }
 
@@ -939,20 +953,7 @@ export const WIDGET_STYLES = `
   transform: scale(1.05);
 }
 
-/* Send: Hidden when empty, Popped In when text exists */
-.chat-input-controls:not(.has-text) #sendBtn {
-  display: none;
-}
 
-.chat-input-controls.has-text #sendBtn {
-  display: flex;
-  animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-/* Remove old conflicting hidden rules */
-.chat-input-controls.has-text #micBtn {
-  display: flex; /* Keep visible! */
-}
 
 
 @keyframes popIn {
@@ -1000,15 +1001,6 @@ export const WIDGET_STYLES = `
   color: #e74c3c !important;
   background: rgba(231, 76, 60, 0.1);
   animation: recordPulse 1.5s infinite;
-}
-
-.input-button#sendBtn {
-  background: var(--primary-color);
-  color: white;
-  padding: 10px;
-}
-.input-button#sendBtn:hover {
-  transform: scale(1.05);
 }
 
 .branding {
