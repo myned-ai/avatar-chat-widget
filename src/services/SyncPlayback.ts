@@ -14,6 +14,7 @@ export interface SyncFrame {
   weights: Record<string, number>;  // Blendshape weights
   timestamp: number;       // Server timestamp
   frameIndex: number;      // Frame sequence number
+  sessionId?: string;      // Session ID
 }
 
 export interface PlaybackState {
