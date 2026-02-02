@@ -466,11 +466,11 @@ export const WIDGET_STYLES = `
   margin: 0 auto;
   text-align: center;
   
-  /* Typography - Editorial "Elegant" Look */
+  /* Typography - Compact and readable */
   font-family: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500; /* Medium - not bold, less aggressive */
-  line-height: 1.5;
+  line-height: 1.4;
   letter-spacing: -0.01em;
   color: #374151; /* Soft Dark Grey - easier on the eyes */
   
@@ -479,15 +479,15 @@ export const WIDGET_STYLES = `
   border: none;
   box-shadow: none;
   border-radius: 0;
-  padding: 0 24px;
+  padding: 0 16px;
   
   /* Tiny shadow to lift it off the mist */
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
   
-  /* Layout */
+  /* Layout - constrained width for compact display */
   z-index: 25; /* Above the mist layer (mist is z-index 10) */
-  max-width: 100%;
-  width: auto;
+  max-width: 320px; /* Constrain width for shorter subtitles */
+  width: fit-content;
   
   /* Single line with ellipsis fallback */
   white-space: nowrap;

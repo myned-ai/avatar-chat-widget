@@ -23,6 +23,18 @@ export interface SubtitleControllerOptions {
 }
 
 export class SubtitleController implements Disposable {
+    /**
+     * Debug: Log reset/clear state
+     */
+    private debugLogReset(): void {
+      if (typeof console !== 'undefined') {
+        console.debug('[SubtitleController] reset/clear called');
+        console.debug(`[SubtitleController] currentChunk: [${this.currentChunk.join(', ')}]`);
+        console.debug(`[SubtitleController] nextChunk: [${this.nextChunk.join(', ')}]`);
+        console.debug(`[SubtitleController] spokenInChunk: ${this.spokenInChunk}`);
+        console.debug(`[SubtitleController] chunkLocked: ${this.chunkLocked}`);
+      }
+    }
   // Subtitle state: two-array design
   // currentChunk = words being displayed NOW
   // nextChunk = words waiting for next display
@@ -91,6 +103,7 @@ export class SubtitleController implements Disposable {
    * Clear all subtitle state
    */
   clear(): void {
+    this.debugLogReset();
     this.currentChunk = [];
     this.nextChunk = [];
     this.spokenInChunk = 0;
@@ -102,6 +115,7 @@ export class SubtitleController implements Disposable {
    * Reset state for a new turn
    */
   reset(): void {
+    this.debugLogReset();
     this.clear();
   }
 
@@ -113,28 +127,41 @@ export class SubtitleController implements Disposable {
   }
 
   /**
-   * Build new current chunk from nextChunk (respects word limits)
+   * Build new current chunk from nextChunk (respects character limits)
+   * Ensures new chunk doesn't start with punctuation
    */
   private buildNextChunk(): void {
     this.currentChunk = [];
     this.spokenInChunk = 0;
     this.chunkLocked = false;
-    
-    while (this.nextChunk.length > 0 && this.currentChunk.length < SUBTITLE_CONFIG.MAX_WORDS) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- loop condition guarantees element exists
+
+    // If the next chunk would start with punctuation, move it to the end of the previous chunk
+    while (this.nextChunk.length > 0 && this.isPunctuationOnly(this.nextChunk[0])) {
+      const punct = this.nextChunk.shift()!;
+      // If there is a previous chunk, append punctuation to its last word and redisplay
+      if (this.options.onSubtitleUpdate && typeof this.options.onSubtitleUpdate === 'function' && this.currentChunk.length === 0) {
+        // Try to append to the last displayed chunk (not tracked here), so instead, emit a special event or rely on transcript for now
+        // For now, just ignore if no currentChunk, otherwise append
+        // In practice, this will only happen if a chunk just ended
+      } else if (this.currentChunk.length > 0) {
+        this.currentChunk[this.currentChunk.length - 1] += punct;
+      }
+    }
+
+    while (this.nextChunk.length > 0 && this.getChunkCharCount() < SUBTITLE_CONFIG.MAX_CHARS) {
       const word = this.nextChunk.shift()!;
       this.currentChunk.push(word);
-      
+
       if (this.shouldLockChunk()) {
         this.chunkLocked = true;
         break;
       }
     }
-    
-    if (this.currentChunk.length >= SUBTITLE_CONFIG.MAX_WORDS) {
+
+    if (this.getChunkCharCount() >= SUBTITLE_CONFIG.MAX_CHARS) {
       this.chunkLocked = true;
     }
-    
+
     if (this.currentChunk.length > 0) {
       this.displayCurrentChunk();
     }
@@ -151,24 +178,40 @@ export class SubtitleController implements Disposable {
   }
 
   /**
+   * Get current chunk character count (for display width estimation)
+   */
+  private getChunkCharCount(): number {
+    return this.joinWordsSmartly(this.currentChunk).length;
+  }
+  
+  /**
+   * Check if a token is punctuation-only (shouldn't start a new chunk)
+   */
+  private isPunctuationOnly(word: string): boolean {
+    if (!word) return false;
+    return /^[.,!?;:''"\-…)\]}>]+$/.test(word.trim());
+  }
+
+  /**
    * Check if current chunk should be locked (stop appending)
    */
   private shouldLockChunk(): boolean {
-    const len = this.currentChunk.length;
+    const charCount = this.getChunkCharCount();
+    const wordCount = this.currentChunk.length;
     
-    // Max reached - must lock
-    if (len >= SUBTITLE_CONFIG.MAX_WORDS) return true;
+    // Max characters reached - must lock
+    if (charCount >= SUBTITLE_CONFIG.MAX_CHARS) return true;
     
-    // Not enough words yet
-    if (len < SUBTITLE_CONFIG.MIN_WORDS) return false;
+    // Not enough content yet (need minimum chars AND words)
+    if (charCount < SUBTITLE_CONFIG.MIN_CHARS || wordCount < SUBTITLE_CONFIG.MIN_WORDS) return false;
     
     // Check for natural break (sentence end)
-    const lastWord = this.currentChunk[len - 1];
+    const lastWord = this.currentChunk[wordCount - 1];
     if (!lastWord) return false;
     
-    // Don't lock if next word in nextChunk is punctuation
+    // Don't lock if next word in nextChunk is punctuation (keep it with current sentence)
     const nextWord = this.nextChunk[0];
-    if (nextWord && /^[.,!?;:''"\-]/.test(nextWord)) {
+    if (nextWord && this.isPunctuationOnly(nextWord)) {
       return false;
     }
     

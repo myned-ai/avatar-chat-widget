@@ -26,13 +26,19 @@ export const CHAT_TIMING = {
 
 /**
  * Subtitle Display Configuration
+ * 
+ * Uses character-based limits to fit text in available space
+ * rather than fixed word counts.
  */
 export const SUBTITLE_CONFIG = {
-  /** Minimum words before considering a natural break */
-  MIN_WORDS: 5,
+  /** Minimum characters before considering a natural break */
+  MIN_CHARS: 18,
   
-  /** Maximum words per subtitle chunk */
-  MAX_WORDS: 7,
+  /** Maximum characters per subtitle chunk (fits within visible area) */
+  MAX_CHARS: 38,
+  
+  /** Minimum words before considering a natural break (fallback) */
+  MIN_WORDS: 3,
 } as const;
 
 /**

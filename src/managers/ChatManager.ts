@@ -89,6 +89,12 @@ export class ChatManager implements Disposable {
     previousItemId?: string;
     role: 'user' | 'assistant';
   }> = [];
+  
+  // Counter for words that have been displayed but not yet marked as spoken in subtitles
+  private wordsSpokenCount: number = 0;
+  
+  // Base offset for the current turn (first startOffset received, used to normalize offsets per turn)
+  private turnBaseOffset: number | null = null;
 
   // Event listener references for cleanup (prevents memory leaks in SPAs)
   private keypressHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -378,15 +384,21 @@ export class ChatManager implements Disposable {
 
   private handleAudioStart(event: AudioStartEvent): void {
     this.setTyping(false);
-    log.info('Audio start received:', event.turnId);
+    log.info('[AUDIO] Audio start received:', event.turnId, 'sessionId:', event.sessionId);
     
     this.currentTurnId = event.turnId;
     this.currentSessionId = event.sessionId;
     this.turnStartTime = Date.now();
     
-    // Reset transcript queue and subtitle state for new turn
+    // Reset transcript queue, subtitle, and transcript state for new assistant turn
+    log.debug(`[AUDIO] Resetting queue (had ${this.transcriptQueue.length} items)`);
     this.transcriptQueue = [];
+    this.wordsSpokenCount = 0;
+    this.turnBaseOffset = null; // Reset base offset for new turn
+    log.debug('[AUDIO] Calling subtitleController.reset()');
     this.subtitleController.reset();
+    log.debug('[AUDIO] Calling transcriptManager.clear()');
+    this.transcriptManager.clear(); // Ensures transcript buffer is fully reset for new turn
     
     this.syncPlayback.startSession(event.sessionId, event.sampleRate);
     this.audioOutput.startSession(event.sessionId, event.sampleRate);
@@ -437,18 +449,30 @@ export class ChatManager implements Disposable {
   private handleTranscriptDelta(event: TranscriptDeltaEvent): void {
     const { role, text, itemId, previousItemId, startOffset } = event;
     
+    // DEBUG: Log incoming transcript delta
+    log.debug(`[TRANSCRIPT] Delta received: role=${role}, text="${text}", startOffset=${startOffset}ms`);
+    
     if (role === 'assistant') {
       // Add word to subtitle controller (for chunk-based display)
       this.subtitleController.addWord(text);
       
       if (typeof startOffset === 'number') {
+        // Normalize offset relative to turn start (server sends cumulative offsets)
+        // First word of the turn sets the base offset; all subsequent offsets are relative to it
+        if (this.turnBaseOffset === null) {
+          this.turnBaseOffset = startOffset;
+          log.debug(`[TRANSCRIPT] Set turnBaseOffset=${this.turnBaseOffset}ms`);
+        }
+        const normalizedOffset = startOffset - this.turnBaseOffset;
+        log.debug(`[TRANSCRIPT] Normalized offset: ${startOffset}ms - ${this.turnBaseOffset}ms = ${normalizedOffset}ms`);
+        
         // Queue for synced display with audio playback time
         // User messages with 0 offset show immediately
-        if (startOffset <= 0) {
+        if (normalizedOffset <= 0) {
           this.transcriptManager.appendToAssistantTurn(text);
           this.subtitleController.markWordSpoken();
         } else {
-          this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+          this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset: normalizedOffset });
         }
       } else {
         // No startOffset - display immediately (fallback for legacy)
@@ -458,7 +482,9 @@ export class ChatManager implements Disposable {
     } else if (role === 'user') {
       // User messages with startOffset 0 or no offset show immediately
       if (typeof startOffset === 'number' && startOffset > 0) {
-        this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+        // Normalize user offsets as well
+        const normalizedOffset = this.turnBaseOffset !== null ? startOffset - this.turnBaseOffset : startOffset;
+        this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset: normalizedOffset });
       } else {
         this.transcriptManager.streamText(text, role, itemId, previousItemId);
       }
@@ -564,31 +590,65 @@ export class ChatManager implements Disposable {
     if (this.transcriptQueue.length === 0) return;
 
     const playbackState = this.syncPlayback.getState();
+    
+    // DEBUG: Log playback state periodically (every 500ms worth of change)
     const playbackTimeMs = playbackState.audioPlaybackTime * 1000;
-    const DISPLAY_LEAD_MS = 100; // Allow text to appear slightly before audio
+    
+    // SUBTITLE TIMING: No lead - exact sync with audio timestamps
+    // The server provides accurate startOffset values, display at exact time
+    const adjustedPlaybackTimeMs = playbackTimeMs;
+    
+    // CRITICAL: Don't process until playback has actually started
+    // This prevents the buffer flush bug where all words would appear at once
+    if (!playbackState.isPlaying) {
+      // DEBUG: Log why we're not processing
+      if (this.transcriptQueue.length > 0 && Math.random() < 0.01) { // Log occasionally
+        log.debug(`[QUEUE] Waiting for playback to start. Queue size: ${this.transcriptQueue.length}, isPlaying: ${playbackState.isPlaying}`);
+      }
+      return;
+    }
+    
+    // DEBUG: Log queue processing
+    const nextItem = this.transcriptQueue[0];
+    if (nextItem) {
+      log.debug(`[QUEUE] Processing: playbackTime=${playbackTimeMs.toFixed(0)}ms, nextWord="${nextItem.text}" @ ${nextItem.startOffset}ms, queueSize=${this.transcriptQueue.length}`);
+    }
 
-    // Process items that are due based on playback time
+    // Process items that are due for DISPLAY (exact sync with audio)
+    let processedCount = 0;
     while (this.transcriptQueue.length > 0) {
       const item = this.transcriptQueue[0];
-
-      // Item is due if its offset is before or near current playback time
-      const isDue = item.startOffset <= playbackTimeMs + DISPLAY_LEAD_MS;
+      const isDue = item.startOffset <= adjustedPlaybackTimeMs;
 
       if (isDue) {
-        this.transcriptQueue.shift(); // Remove from queue
+        this.transcriptQueue.shift();
+        processedCount++;
+        
+        // DEBUG: Log each word as it's dequeued with timing info
+        log.debug(`[QUEUE] Dequeuing "${item.text}" - offset=${item.startOffset}ms, playback=${playbackTimeMs.toFixed(0)}ms, delta=${(playbackTimeMs - item.startOffset).toFixed(0)}ms`);
 
-        // Render it
         if (item.role === 'assistant') {
           this.transcriptManager.appendToAssistantTurn(item.text);
-          this.subtitleController.markWordSpoken(); // Advance subtitle chunking
+          this.wordsSpokenCount++;
         } else {
-          // Fallback for user messages (should usually have 0 offset)
           this.transcriptManager.streamText(item.text, item.role, item.itemId, item.previousItemId);
         }
       } else {
-        // Queue is ordered by time, so we can stop checking
+        // DEBUG: Log why we stopped processing
+        log.debug(`[QUEUE] Next word "${item.text}" not due yet - offset=${item.startOffset}ms, playback=${playbackTimeMs.toFixed(0)}ms, wait=${(item.startOffset - playbackTimeMs).toFixed(0)}ms`);
         break;
       }
+    }
+    
+    // DEBUG: Log if we processed any words
+    if (processedCount > 0) {
+      log.debug(`[QUEUE] Dequeued ${processedCount} words at playbackTime=${playbackTimeMs.toFixed(0)}ms`);
+    }
+    
+    // SUBTITLE SYNC: Mark words as spoken for each word that was dequeued
+    while (this.wordsSpokenCount > 0) {
+      this.subtitleController.markWordSpoken();
+      this.wordsSpokenCount--;
     }
   }
 

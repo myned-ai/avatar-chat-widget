@@ -38,6 +38,17 @@ export interface StreamingEntry {
 }
 
 export class TranscriptManager implements Disposable {
+    /**
+     * Debug: Log clear state
+     */
+    private debugLogClear(): void {
+      log.debug('[TranscriptManager] clear() called');
+      log.debug(`[TranscriptManager] streamingByItem.size: ${this.streamingByItem.size}`);
+      log.debug(`[TranscriptManager] bufferedDeltas.size: ${this.bufferedDeltas.size}`);
+      log.debug(`[TranscriptManager] bufferTimeouts.size: ${this.bufferTimeouts.size}`);
+      log.debug(`[TranscriptManager] currentAssistantTurnElement: ${!!this.currentAssistantTurnElement}`);
+      log.debug(`[TranscriptManager] currentAssistantTurnText: "${this.currentAssistantTurnText}"`);
+    }
   private chatMessages: HTMLElement;
   private options: TranscriptManagerOptions;
   
@@ -292,20 +303,18 @@ export class TranscriptManager implements Disposable {
    * Clear all state
    */
   clear(): void {
+    this.debugLogClear();
     this.streamingByItem.clear();
     this.latestItemForRole = {};
     this.bufferedDeltas.clear();
-    
     for (const timeout of this.bufferTimeouts.values()) {
       clearTimeout(timeout);
     }
     this.bufferTimeouts.clear();
-    
     if (this.assistantAppendInterval) {
       clearInterval(this.assistantAppendInterval);
       this.assistantAppendInterval = null;
     }
-    
     this.currentAssistantTurnElement = null;
     this.currentAssistantTurnText = '';
   }
