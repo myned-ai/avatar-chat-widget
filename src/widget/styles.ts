@@ -88,6 +88,8 @@ export const WIDGET_STYLES = `
     height: 100vh;
     max-height: 100vh;
     border-radius: 0;
+    /* Let the mobile media query at the bottom handle the rest */
+    padding-bottom: 90px; /* Ensure input layer space is preserved */
   }
 }
 
@@ -121,9 +123,16 @@ export const WIDGET_STYLES = `
   align-items: center;
   /* Default: transparent when avatar is visible */
   background: transparent;
+  background-color: transparent;
   z-index: 10;
   position: relative;
   transition: background 0.3s ease;
+}
+
+/* Avatar-focus header - ALWAYS transparent */
+[data-drawer-state="avatar-focus"] .header-layer {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 /* Solid header when text-focus (avatar collapsed) - Alcove design */
@@ -136,6 +145,11 @@ export const WIDGET_STYLES = `
   overflow: visible; /* Allow avatar to overflow */
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
+}
+
+/* Dark theme text-focus header */
+.theme-dark[data-drawer-state="text-focus"] .header-layer {
+  background: #0f111a;
 }
 
 /* Allow avatar circle to break out of widget in text-focus */
@@ -326,6 +340,7 @@ export const WIDGET_STYLES = `
   border-radius: 50%;
   overflow: visible;
   z-index: 100; /* Float above everything */
+  background: white; /* White background for the orb */
   
   /* The Casing - thick white border */
   border: 4px solid #FFFFFF;
@@ -336,6 +351,11 @@ export const WIDGET_STYLES = `
   margin-top: 0;
   padding-top: 0;
   transition: none;
+}
+
+.theme-dark [data-drawer-state="text-focus"] .avatar-section {
+  background: #1e2130;
+  border-color: #1e2130;
 }
 
 /* Clip avatar content to circle but allow status dot to overflow */
@@ -382,7 +402,7 @@ export const WIDGET_STYLES = `
 }
 
 .theme-dark .avatar-stage {
-  background: radial-gradient(circle at center 30%, #2d3748 0%, #0f111a 100%);
+  background: radial-gradient(circle at center 30%, #1a1d2e 0%, #0f111a 100%);
 }
 
 /* Avatar Render Container (Injected by LazyAvatar) */
@@ -576,8 +596,8 @@ export const WIDGET_STYLES = `
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 4px;
+  padding: 4px;
   z-index: 15;
 }
 
@@ -595,9 +615,9 @@ export const WIDGET_STYLES = `
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid var(--border-color);
   color: var(--primary-color);
-  padding: 6px 12px;
+  padding: 6px 10px;
   border-radius: 16px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
@@ -726,7 +746,7 @@ export const WIDGET_STYLES = `
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: flex-end;
+  align-items: center; /* Center horizontally */
   gap: 10px;
   padding: 12px 16px;
   transition: opacity 0.2s ease;
@@ -1187,23 +1207,161 @@ export const WIDGET_STYLES = `
   :host(:not(.collapsed)) .widget-root {
     width: 100% !important;
     height: 100% !important;
+    max-height: 100% !important;
     border-radius: 0 !important;
     border: none !important;
+    /* Override CSS custom properties for mobile full-screen */
+    --widget-height: 100% !important;
   }
   
-  /* Adjust container sizes for mobile */
-  :host(:not(.collapsed)) .avatar-stage {
-    height: 40%; /* Decreased from 50% to favor chat bubbles */
+  /* Avatar-focus mode on mobile: avatar takes most of the space */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] {
+    --avatar-height: calc(100vh - 56px - 90px) !important; /* Full height minus header and input */
+    background: transparent !important; /* Let avatar stage show through */
   }
   
-  :host(:not(.collapsed)) .avatar-render-container {
-    transform: translateX(-50%) scale(0.65); /* Adjusted for mobile */
-    bottom: -150px; /* Adjusted coordinate */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-section {
+    height: 100% !important; /* Full height */
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 90px; /* Above input */
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: auto !important;
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-render-container {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.85); /* Larger on mobile */
+  }
+  
+  /* Header in avatar-focus mode on mobile - solid color, not transparent */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .header-layer,
+  [data-drawer-state="avatar-focus"] .header-layer,
+  .widget-root[data-drawer-state="avatar-focus"] .header-layer {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+  
+  /* Dark theme header in avatar-focus - dark background */
+  :host(:not(.collapsed)) .theme-dark[data-drawer-state="avatar-focus"] .header-layer,
+  .theme-dark[data-drawer-state="avatar-focus"] .header-layer,
+  .widget-root.theme-dark[data-drawer-state="avatar-focus"] .header-layer,
+  [data-drawer-state="avatar-focus"].theme-dark .header-layer {
+    background: #0f111a !important;
+    background-color: #0f111a !important;
+  }
+  
+  /* Use solid white background for avatar stage on mobile - matches input/chat */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
+    background: #ffffff !important; /* Pure white for light theme */
+  }
+  
+  /* Dark theme avatar stage on mobile - multiple selectors for specificity */
+  :host(:not(.collapsed)) .theme-dark[data-drawer-state="avatar-focus"] .avatar-stage,
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"].theme-dark .avatar-stage,
+  .theme-dark[data-drawer-state="avatar-focus"] .avatar-stage,
+  .widget-root.theme-dark[data-drawer-state="avatar-focus"] .avatar-stage {
+    background: #0f111a !important; /* Dark background for dark theme */
+  }
+  
+  /* Text-focus mode on mobile: chat takes most of the space, avatar in corner */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] {
+    --chat-height: calc(100vh - 70px - 90px) !important; /* Full height minus header and input */
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .chat-section {
+    height: calc(100vh - 70px - 90px) !important;
+    flex: 1;
+  }
+  
+  /* Avatar orb in text-focus stays same size but repositioned for mobile */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-section {
+    left: -15px; /* Less overhang on mobile */
+    top: -5px;
+    width: 70px; /* Slightly smaller on mobile */
+    height: 70px;
+    border-width: 3px;
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-render-container {
+    transform: translate(-50%, -50%) scale(0.20); /* Scaled for smaller orb */
   }
 
   /* Make header bigger on mobile */
   :host(:not(.collapsed)) .chat-header-overlay {
     padding: 16px;
+  }
+  
+  /* Adjust header text indent for smaller avatar orb in text-focus */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .header-layer {
+    padding-left: 70px; /* Reduced from 90px for smaller mobile avatar */
+  }
+  
+  /* Reposition avatar orb in text-focus mode on mobile - no overflow */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-section {
+    left: 10px; /* Inside the widget, not hanging off */
+    top: 8px; /* Moved down to stay within bounds */
+  }
+  
+  /* Disable expanded state on mobile - already full screen */
+  :host(:not(.collapsed)) .widget-root.expanded {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  
+  /* Hide expand button on mobile */
+  :host(:not(.collapsed)) .expand-btn {
+    display: none !important;
+  }
+  
+  /* Larger suggestion chips on mobile - balanced between avatar and input */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions {
+    bottom: 110px; /* Similar position to subtitles, above input */
+    width: 95%;
+    max-width: none;
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions .suggestion-chip {
+    padding: 12px 18px;
+    font-size: 14px;
+    border-radius: 20px;
+  }
+  
+  /* Mist overlay on mobile - covers lower portion without reaching avatar's face */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
+    display: block;
+    bottom: 0;
+    height: 35vh; /* Cover lower third of screen */
+  }
+  
+  /* Subtitles on mobile - positioned between avatar and input */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-subtitles {
+    display: block;
+    bottom: 100px; /* Above input (90px) + some padding */
+    max-width: 90%;
+    width: auto;
+    font-size: 15px;
+    white-space: normal; /* Allow wrapping on mobile */
+    line-height: 1.5;
+    padding: 0 20px;
+  }
+  
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-subtitles:not(:empty) {
+    opacity: 1;
   }
 }
 
