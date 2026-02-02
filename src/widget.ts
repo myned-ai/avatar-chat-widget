@@ -465,7 +465,9 @@ class AvatarChatElement extends HTMLElement {
     
     // Populate suggestion chips from config (both in chat and avatar sections)
     if (this.config.suggestions && this.config.suggestions.length > 0) {
-      const chipsHtml = this.config.suggestions
+      // Sort suggestions by length so similar-length ones appear on the same line
+      const sortedSuggestions = [...this.config.suggestions].sort((a, b) => a.length - b.length);
+      const chipsHtml = sortedSuggestions
         .map(text => `<button class="suggestion-chip">${this.escapeHtml(text)}</button>`)
         .join('');
       
