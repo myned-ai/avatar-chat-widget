@@ -81,6 +81,15 @@ export class ChatManager implements Disposable {
   private autoScrollObserver: MutationObserver | null = null;
   private useSyncPlayback = false;
 
+  // Transcript Queue for synced display (words are queued with startOffset, displayed when audio reaches that time)
+  private transcriptQueue: Array<{
+    text: string;
+    startOffset: number;
+    itemId?: string;
+    previousItemId?: string;
+    role: 'user' | 'assistant';
+  }> = [];
+
   // Event listener references for cleanup (prevents memory leaks in SPAs)
   private keypressHandler: ((e: KeyboardEvent) => void) | null = null;
   private micClickHandler: (() => void) | null = null;
@@ -205,6 +214,10 @@ export class ChatManager implements Disposable {
       this.animationFrameId = null;
     }
     
+    // Disconnect websocket to save resources/bandwidth when minimized
+    this.protocolClient.disconnect();
+    log.info('Disconnected on minimize');
+    
     this.avatar.disableLiveBlendshapes();
     this.avatar.setChatState('Idle');
     this.subtitleController.clear();
@@ -255,6 +268,15 @@ export class ChatManager implements Disposable {
 
     this.syncPlayback.setPlaybackEndCallback(() => {
       log.info('SyncPlayback ended - transitioning to Idle');
+      
+      // Flush any remaining queued transcript items
+      while (this.transcriptQueue.length > 0) {
+        const item = this.transcriptQueue.shift();
+        if (item?.role === 'assistant') {
+          this.transcriptManager.appendToAssistantTurn(item.text);
+        }
+      }
+      
       this.avatar.setChatState('Idle');
       this.avatar.disableLiveBlendshapes();
       this.useSyncPlayback = false;
@@ -362,7 +384,8 @@ export class ChatManager implements Disposable {
     this.currentSessionId = event.sessionId;
     this.turnStartTime = Date.now();
     
-    // Reset subtitle state for new turn
+    // Reset transcript queue and subtitle state for new turn
+    this.transcriptQueue = [];
     this.subtitleController.reset();
     
     this.syncPlayback.startSession(event.sessionId, event.sampleRate);
@@ -412,15 +435,33 @@ export class ChatManager implements Disposable {
   }
 
   private handleTranscriptDelta(event: TranscriptDeltaEvent): void {
-    const { role, text, itemId, previousItemId } = event;
+    const { role, text, itemId, previousItemId, startOffset } = event;
     
     if (role === 'assistant') {
-      // Add word to subtitle controller
+      // Add word to subtitle controller (for chunk-based display)
       this.subtitleController.addWord(text);
-      // Append to transcript bubble
-      this.transcriptManager.appendToAssistantTurn(text);
-    } else {
-      this.transcriptManager.streamText(text, role, itemId, previousItemId);
+      
+      if (typeof startOffset === 'number') {
+        // Queue for synced display with audio playback time
+        // User messages with 0 offset show immediately
+        if (startOffset <= 0) {
+          this.transcriptManager.appendToAssistantTurn(text);
+          this.subtitleController.markWordSpoken();
+        } else {
+          this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+        }
+      } else {
+        // No startOffset - display immediately (fallback for legacy)
+        this.transcriptManager.appendToAssistantTurn(text);
+        this.subtitleController.markWordSpoken();
+      }
+    } else if (role === 'user') {
+      // User messages with startOffset 0 or no offset show immediately
+      if (typeof startOffset === 'number' && startOffset > 0) {
+        this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset });
+      } else {
+        this.transcriptManager.streamText(text, role, itemId, previousItemId);
+      }
     }
   }
 
@@ -431,8 +472,13 @@ export class ChatManager implements Disposable {
       if (event.interrupted) {
         this.transcriptManager.replaceAssistantTurnText(event.text);
       }
-      this.transcriptManager.finalizeAssistantTurn();
-      this.subtitleController.clear();
+      // Don't finalize if queue still has items - let playbackEnd handle it
+      // This prevents creating new bubbles when dequeued words arrive after transcript_done
+      if (this.transcriptQueue.length === 0) {
+        this.transcriptManager.finalizeAssistantTurn();
+        this.subtitleController.clear();
+      }
+      // If queue has items, finalization happens in setPlaybackEndCallback
     } else {
       if (!this.transcriptManager.hasActiveAssistantTurn()) {
         this.transcriptManager.addMessage(event.text, event.role);
@@ -491,6 +537,9 @@ export class ChatManager implements Disposable {
 
   private startBlendshapeSync(): void {
     const sync = () => {
+      // Process any queued transcript items (sync text with audio playback time)
+      this.processTranscriptQueue();
+      
       if (!this.useSyncPlayback) {
         const result = this.blendshapeBuffer.getFrame();
         this.avatar.updateBlendshapes(result.weights);
@@ -504,6 +553,43 @@ export class ChatManager implements Disposable {
       this.animationFrameId = requestAnimationFrame(sync);
     };
     sync();
+  }
+
+  /**
+   * Process queued transcript items based on audio playback time.
+   * Words are displayed when the audio playback reaches their startOffset timestamp.
+   * This keeps transcript text in sync with spoken audio.
+   */
+  private processTranscriptQueue(): void {
+    if (this.transcriptQueue.length === 0) return;
+
+    const playbackState = this.syncPlayback.getState();
+    const playbackTimeMs = playbackState.audioPlaybackTime * 1000;
+    const DISPLAY_LEAD_MS = 100; // Allow text to appear slightly before audio
+
+    // Process items that are due based on playback time
+    while (this.transcriptQueue.length > 0) {
+      const item = this.transcriptQueue[0];
+
+      // Item is due if its offset is before or near current playback time
+      const isDue = item.startOffset <= playbackTimeMs + DISPLAY_LEAD_MS;
+
+      if (isDue) {
+        this.transcriptQueue.shift(); // Remove from queue
+
+        // Render it
+        if (item.role === 'assistant') {
+          this.transcriptManager.appendToAssistantTurn(item.text);
+          this.subtitleController.markWordSpoken(); // Advance subtitle chunking
+        } else {
+          // Fallback for user messages (should usually have 0 offset)
+          this.transcriptManager.streamText(item.text, item.role, item.itemId, item.previousItemId);
+        }
+      } else {
+        // Queue is ordered by time, so we can stop checking
+        break;
+      }
+    }
   }
 
   private setTyping(typing: boolean): void {
