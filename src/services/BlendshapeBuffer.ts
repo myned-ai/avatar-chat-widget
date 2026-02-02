@@ -168,6 +168,7 @@ export class BlendshapeBuffer implements Disposable {
   }
 
   /**
+   * @deprecated Use getFrame() instead. This method exists for backwards compatibility only.
    * Legacy method for backwards compatibility - returns just weights or null
    */
   getFrameWeights(currentTime?: number): Record<string, number> | null {

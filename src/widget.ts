@@ -208,6 +208,7 @@ class AvatarChatElement extends HTMLElement {
 
     const container = document.createElement('div');
     container.innerHTML = BUBBLE_TEMPLATE;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- BUBBLE_TEMPLATE always has root element
     const wrapper = container.firstElementChild!;
     
     // Attach events to actual bubble element
@@ -818,6 +819,28 @@ export const AvatarChat = {
       }
     }
 
+    // Validate suggestions array if provided
+    if (config.suggestions !== undefined) {
+      if (!Array.isArray(config.suggestions)) {
+        throw new Error('AvatarChat.init(): suggestions must be an array of strings');
+      }
+      if (config.suggestions.some(s => typeof s !== 'string')) {
+        throw new Error('AvatarChat.init(): all suggestions must be strings');
+      }
+      // Limit suggestion count and length to prevent abuse
+      if (config.suggestions.length > 10) {
+        throw new Error('AvatarChat.init(): maximum 10 suggestions allowed');
+      }
+      if (config.suggestions.some(s => s.length > 200)) {
+        throw new Error('AvatarChat.init(): suggestion text must be 200 characters or less');
+      }
+    }
+
+    // Validate customStyles if provided (basic check - CSS is sandboxed in Shadow DOM)
+    if (config.customStyles !== undefined && typeof config.customStyles !== 'string') {
+      throw new Error('AvatarChat.init(): customStyles must be a string');
+    }
+
     // Validate callbacks if provided
     if (config.onReady !== undefined && typeof config.onReady !== 'function') {
       throw new Error('AvatarChat.init(): onReady must be a function');
@@ -829,6 +852,21 @@ export const AvatarChat = {
 
     if (config.onError !== undefined && typeof config.onError !== 'function') {
       throw new Error('AvatarChat.init(): onError must be a function');
+    }
+
+    // Validate avatarUrl if provided (must be a URL or relative path ending in .zip)
+    if (config.avatarUrl !== undefined) {
+      if (typeof config.avatarUrl !== 'string') {
+        throw new Error('AvatarChat.init(): avatarUrl must be a string');
+      }
+      // Must end with .zip and not contain dangerous characters
+      if (!config.avatarUrl.endsWith('.zip')) {
+        throw new Error('AvatarChat.init(): avatarUrl must be a .zip file');
+      }
+      // Prevent path traversal attacks
+      if (config.avatarUrl.includes('..')) {
+        throw new Error('AvatarChat.init(): avatarUrl cannot contain path traversal');
+      }
     }
 
     // Validate logLevel if provided
