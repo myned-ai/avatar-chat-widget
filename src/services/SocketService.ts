@@ -143,16 +143,18 @@ export class SocketService extends EventEmitter implements Disposable {
       }
 
       this.emit('message', message);
-      // DEBUG: Log important message types to console (skip high-frequency ones)
+      // DEBUG: Log important message types (skip high-frequency ones)
       if (message.type !== 'sync_frame' && message.type !== 'transcript_delta' && message.type !== 'blendshape') {
-        console.log('[WS] Received message type:', message.type, message);
+        log.debug('Received message type:', message.type, message);
       }
       // Lightweight diagnostics: log incoming message metadata useful for frame-skip analysis
       try {
-        const meta: Record<string, any> = { type: message.type };
-        if ((message as any).frameIndex !== undefined) meta.frameIndex = (message as any).frameIndex;
-        if ((message as any).timestamp !== undefined) meta.timestamp = (message as any).timestamp;
-        if ((message as any).itemId !== undefined) meta.itemId = (message as any).itemId;
+        const meta: Record<string, string | number | undefined> = { type: message.type };
+        // Type-safe property access for common diagnostic fields
+        const msgWithMeta = message as { frameIndex?: number; timestamp?: number; itemId?: string };
+        if (msgWithMeta.frameIndex !== undefined) meta.frameIndex = msgWithMeta.frameIndex;
+        if (msgWithMeta.timestamp !== undefined) meta.timestamp = msgWithMeta.timestamp;
+        if (msgWithMeta.itemId !== undefined) meta.itemId = msgWithMeta.itemId;
         if (event.data instanceof ArrayBuffer) meta.byteLength = event.data.byteLength;
         log.debug('Incoming message', meta);
       } catch (e) {
@@ -334,6 +336,11 @@ export class SocketService extends EventEmitter implements Disposable {
     this.stopHeartbeat();
 
     if (this.ws) {
+      // Null handlers to prevent memory leaks from closures
+      this.ws.onopen = null;
+      this.ws.onclose = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
     }

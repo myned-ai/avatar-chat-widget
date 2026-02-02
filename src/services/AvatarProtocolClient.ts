@@ -14,8 +14,8 @@ import {
 
 const log = logger.scope('ProtocolClient');
 
-// Define events that this client emits
-type ProtocolClientEvents = {
+// Define events that this client emits (kept for documentation)
+type _ProtocolClientEvents = {
   'audio_start': (event: AudioStartEvent) => void;
   'sync_frame': (event: SyncFrameEvent) => void;
   'audio_end': (event: AudioEndEvent) => void;
@@ -47,9 +47,14 @@ export class AvatarProtocolClient extends EventEmitter {
   // Optional user/session info
   private userId: string;
 
-  constructor(socketService?: SocketService) {
+  /**
+   * Create a new AvatarProtocolClient
+   * @param socketService - Required SocketService instance for WebSocket communication.
+   *                        This ensures a single shared connection is used.
+   */
+  constructor(socketService: SocketService) {
     super();
-    this.socket = socketService || new SocketService();
+    this.socket = socketService;
     this.userId = `user_${Date.now()}`; // Default ID
     this.bindSocketEvents();
   }
@@ -99,14 +104,14 @@ export class AvatarProtocolClient extends EventEmitter {
     this.socket.on('error', (err: Error) => this.emit('error', err));
 
     // Handle Protocol Events
-    this.socket.on('audio_start', (msg: any) => this.handleAudioStart(msg as AudioStartEvent));
-    this.socket.on('sync_frame', (msg: any) => this.handleSyncFrame(msg as SyncFrameEvent));
-    this.socket.on('audio_end', (msg: any) => this.handleAudioEnd(msg as AudioEndEvent));
-    this.socket.on('transcript_delta', (msg: any) => this.handleTranscriptDelta(msg as TranscriptDeltaEvent));
-    this.socket.on('transcript_done', (msg: any) => this.handleTranscriptDone(msg as TranscriptDoneEvent));
-    this.socket.on('interrupt', (msg: any) => this.handleInterrupt(msg as InterruptEvent));
-    this.socket.on('avatar_state', (msg: any) => this.emit('avatar_state', msg as AvatarStateEvent));
-    this.socket.on('pong', (msg: any) => log.debug('Pong received', msg));
+    this.socket.on('audio_start', (msg: AudioStartEvent) => this.handleAudioStart(msg));
+    this.socket.on('sync_frame', (msg: SyncFrameEvent) => this.handleSyncFrame(msg));
+    this.socket.on('audio_end', (msg: AudioEndEvent) => this.handleAudioEnd(msg));
+    this.socket.on('transcript_delta', (msg: TranscriptDeltaEvent) => this.handleTranscriptDelta(msg));
+    this.socket.on('transcript_done', (msg: TranscriptDoneEvent) => this.handleTranscriptDone(msg));
+    this.socket.on('interrupt', (msg: InterruptEvent) => this.handleInterrupt(msg));
+    this.socket.on('avatar_state', (msg: AvatarStateEvent) => this.emit('avatar_state', msg));
+    this.socket.on('pong', (msg: { type: 'pong'; timestamp: number }) => log.debug('Pong received', msg));
   }
 
   // ------------------------------------------------------------------

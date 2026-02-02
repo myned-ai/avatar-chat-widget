@@ -12,7 +12,7 @@ export const LogLevel = {
 export type LogLevelType = typeof LogLevel[keyof typeof LogLevel];
 
 // Detect development mode safely (works in Vite and bundled contexts)
-const isDevelopment = (): boolean => {
+const isDevMode = (): boolean => {
   try {
     // Vite injects these at build time - use dynamic access to avoid TS errors
     const meta = import.meta as { env?: { DEV?: boolean; MODE?: string } };
@@ -25,8 +25,8 @@ const isDevelopment = (): boolean => {
   return false;
 };
 
-// Force Debug for diagnostics during local testing
-const DEFAULT_LEVEL: LogLevelType = LogLevel.Debug;
+// Default to Error level in production, Debug in development
+const DEFAULT_LEVEL: LogLevelType = isDevMode() ? LogLevel.Debug : LogLevel.Error;
 
 class Logger {
   private level: LogLevelType = DEFAULT_LEVEL;

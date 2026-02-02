@@ -9,6 +9,12 @@
  */
 
 import { logger } from '../utils/Logger';
+import { 
+  LAYOUT, 
+  AVATAR_LAYOUT, 
+  CHAT_LAYOUT, 
+  WIDGET_HEIGHTS 
+} from '../constants/layout';
 
 const log = logger.scope('DrawerController');
 
@@ -21,39 +27,17 @@ interface DrawerControllerOptions {
   onStateChange?: (state: DrawerState) => void;
 }
 
-// Fixed heights in pixels
-const HEADER_HEIGHT = 56;
-const INPUT_HEIGHT = 90;
-const FULL_WIDGET_HEIGHT = 540;
-
-// Content area for avatar + chat at full height
-// Widget has padding-bottom: 90px for input, so content area = height - header - input
-const CONTENT_AREA = FULL_WIDGET_HEIGHT - HEADER_HEIGHT - INPUT_HEIGHT; // = 394px
-
-// Avatar needs extra 56px to account for padding-top (fills behind header)
-const AVATAR_PADDING = 56;  // matches header height
-
-// Text-focus chat height - full height
-const CHAT_HEIGHT_TEXT_FOCUS = 394; // 540 - 56 header - 90 input = 394px for chat
-
-// Avatar-focus content height (smaller size - reduced for less bottom whitespace)
-const AVATAR_FOCUS_CONTENT = 224;
-
-// State configuration - avatar height includes padding to extend behind header
+// State configuration using shared layout constants
 const STATE_CONFIG: Record<DrawerState, { avatar: number; chat: number; widgetHeight: number }> = {
   'text-focus': { 
-    avatar: 0,
-    chat: CHAT_HEIGHT_TEXT_FOCUS,  // 394px for chat
-    // Full widget height: 540px
-    widgetHeight: FULL_WIDGET_HEIGHT
+    avatar: AVATAR_LAYOUT.TEXT_FOCUS_HEIGHT,
+    chat: CHAT_LAYOUT.TEXT_FOCUS_HEIGHT,
+    widgetHeight: WIDGET_HEIGHTS.TEXT_FOCUS
   },
   'avatar-focus': { 
-    // Smaller height: header + 224 + input = 370px
-    // Avatar fills the content area: 224px + 56px padding = 280px
-    avatar: AVATAR_FOCUS_CONTENT + AVATAR_PADDING,  // 224 + 56 = 280px (extends behind header)
-    chat: 0,
-    // Widget: 370px
-    widgetHeight: HEADER_HEIGHT + AVATAR_FOCUS_CONTENT + INPUT_HEIGHT
+    avatar: AVATAR_LAYOUT.FOCUS_FULL_HEIGHT,
+    chat: CHAT_LAYOUT.AVATAR_FOCUS_HEIGHT,
+    widgetHeight: WIDGET_HEIGHTS.AVATAR_FOCUS
   },
 };
 
@@ -73,7 +57,10 @@ export class DrawerController {
 
     this.applyState(this.currentState);
     
-    log.debug('DrawerController initialized', { contentArea: CONTENT_AREA });
+    log.debug('DrawerController initialized', { 
+      headerHeight: LAYOUT.HEADER_HEIGHT,
+      inputHeight: LAYOUT.INPUT_HEIGHT 
+    });
   }
 
   getState(): DrawerState {

@@ -143,6 +143,8 @@ export class SyncPlayback implements Disposable {
    * Start a new playback session
    */
   startSession(sessionId: string, sampleRate?: number): void {
+      log.debug(`[SyncPlayback][DEBUG] startSession called: sessionId=${sessionId}, sampleRate=${sampleRate}`);
+      log.debug(`[SyncPlayback][DEBUG] Previous state: isPlaying=${this.isPlaying}, sessionId=${this.sessionId}`);
     log.info('SyncPlayback session started:', sessionId);
     
     this.sessionId = sessionId;
@@ -192,6 +194,8 @@ export class SyncPlayback implements Disposable {
    * Add a synchronized frame (audio + blendshape)
    */
   addSyncFrame(frame: SyncFrame): void {
+      log.debug(`[SyncPlayback][DEBUG] addSyncFrame: frameIndex=${frame.frameIndex}, timestamp=${frame.timestamp}, sessionId=${frame.sessionId}, audioBytes=${frame.audio?.byteLength}`);
+      log.debug(`[SyncPlayback][DEBUG] isPlaying=${this.isPlaying}, currentFrameIndex=${this.currentFrameIndex}, frameBuffer.length=${this.frameBuffer.length}`);
     if (this.isStopped) {
       const now = Date.now();
       if (now - this.lastDropLogTime > 1000) {
@@ -240,11 +244,14 @@ export class SyncPlayback implements Disposable {
       return;
     }
     
-    log.info('Starting synchronized playback with', this.frameBuffer.length, 'buffered frames');
+    log.info('[SYNC] Starting synchronized playback with', this.frameBuffer.length, 'buffered frames');
     
     this.isPlaying = true;
     this.audioStartTime = this.audioContext.currentTime;
     this.nextPlayTime = this.audioStartTime;
+    
+    // DEBUG: Log the audioStartTime for timing correlation
+    log.debug(`[SYNC] audioStartTime set to ${this.audioStartTime.toFixed(3)}s (AudioContext.currentTime)`);
     
     // Start the playback loop
     this.playbackLoop();
@@ -521,9 +528,29 @@ export class SyncPlayback implements Disposable {
    * Get current playback state
    */
   getState(): PlaybackState {
-    const audioPlaybackTime = this.audioContext 
-      ? this.audioContext.currentTime - this.audioStartTime 
-      : 0;
+    log.debug(`[SyncPlayback][DEBUG] getState called. isPlaying=${this.isPlaying}, audioStartTime=${this.audioStartTime}, currentTime=${this.audioContext?.currentTime}`);
+    // CRITICAL: Only calculate playback time if actually playing
+    // When not playing, audioStartTime=0 would give huge incorrect values
+    let audioPlaybackTime = 0;
+    if (this.isPlaying && this.audioContext && this.audioStartTime > 0) {
+      // Account for audio output latency - the delay between scheduling audio
+      // and it actually playing through speakers. Without this, our playback time
+      // runs ahead of actual audio output, causing subtitles to appear early.
+      const baseLatency = this.audioContext.baseLatency || 0;
+      const outputLatency = (this.audioContext as AudioContext & { outputLatency?: number }).outputLatency || 0;
+      const totalLatency = baseLatency + outputLatency;
+      
+      audioPlaybackTime = this.audioContext.currentTime - this.audioStartTime - totalLatency;
+    }
+    
+    // DEBUG: Throttled logging for getState (called frequently from processTranscriptQueue)
+    const now = Date.now();
+    if (now - (this as unknown as { _lastGetStateLog?: number })._lastGetStateLog! > 500) {
+      (this as unknown as { _lastGetStateLog?: number })._lastGetStateLog = now;
+      const baseLatency = this.audioContext?.baseLatency || 0;
+      const outputLatency = (this.audioContext as AudioContext & { outputLatency?: number })?.outputLatency || 0;
+      log.debug(`[SYNC] getState: isPlaying=${this.isPlaying}, audioPlaybackTime=${audioPlaybackTime.toFixed(3)}s (${(audioPlaybackTime * 1000).toFixed(0)}ms), latency=${((baseLatency + outputLatency) * 1000).toFixed(0)}ms`);
+    }
     
     return {
       isPlaying: this.isPlaying,

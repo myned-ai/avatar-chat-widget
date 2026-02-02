@@ -2,7 +2,7 @@
 
 export interface ProtocolEvent {
   type: string;
-  [key: string]: any;
+  timestamp?: number;
 }
 
 // ------------------------------------------------------------------
@@ -21,7 +21,7 @@ export interface AudioStartEvent extends ProtocolEvent {
 export interface SyncFrameEvent extends ProtocolEvent {
   type: 'sync_frame';
   audio: string;         // Base64 PCM16
-  weights: number[];     // 52 ARKit weights
+  weights: number[] | Record<string, number>;  // 52 ARKit weights (array or object)
   frameIndex: number;
   turnId: string;
   timestamp: number;
@@ -105,5 +105,4 @@ export type OutgoingMessage =
   | AudioMessage 
   | TextMessage 
   | InterruptMessage 
-  | PingMessage
-  | { type: string; [key: string]: any }; // Fallback for compatibility
+  | PingMessage;

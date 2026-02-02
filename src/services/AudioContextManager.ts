@@ -22,6 +22,10 @@ class AudioContextManagerImpl {
   private _resumePromise: Promise<void> | null = null;
   private _suspendPromise: Promise<void> | null = null;
   private _sampleRate: number = 24000;
+  
+  // Store listener references for cleanup (prevents memory leaks)
+  private _interactionHandler: (() => Promise<void>) | null = null;
+  private _listenerEvents: string[] = [];
 
   private constructor() {
     // Private constructor for singleton
@@ -84,30 +88,34 @@ class AudioContextManagerImpl {
       return;
     }
 
-    const resumeHandler = async () => {
+    // Use multiple event types for better mobile support
+    this._listenerEvents = ['click', 'touchstart', 'keydown'];
+    
+    // Store handler reference for cleanup
+    this._interactionHandler = async () => {
+      this.removeResumeListeners();
       await this.resume();
     };
 
-    // Use multiple event types for better mobile support
-    const events = ['click', 'touchstart', 'keydown'];
-    
-    const removeListeners = () => {
-      events.forEach(event => {
-        document.removeEventListener(event, onInteraction);
-      });
-    };
-
-    const onInteraction = async () => {
-      removeListeners();
-      await resumeHandler();
-    };
-
-    events.forEach(event => {
-      document.addEventListener(event, onInteraction, { once: true, passive: true });
+    this._listenerEvents.forEach(event => {
+      document.addEventListener(event, this._interactionHandler!, { once: true, passive: true });
     });
 
     this._isResumeListenerAdded = true;
     log.debug('Audio resume listeners added');
+  }
+
+  /**
+   * Remove resume listeners (called after first interaction or on cleanup)
+   */
+  private removeResumeListeners(): void {
+    if (this._interactionHandler) {
+      this._listenerEvents.forEach(event => {
+        document.removeEventListener(event, this._interactionHandler!);
+      });
+      this._interactionHandler = null;
+      this._listenerEvents = [];
+    }
   }
 
   /**
@@ -244,6 +252,9 @@ class AudioContextManagerImpl {
    * Close the AudioContext (cleanup)
    */
   async close(): Promise<void> {
+    // Remove any remaining document listeners to prevent memory leaks
+    this.removeResumeListeners();
+    
     if (this._context) {
       try {
         await this._context.close();
@@ -260,6 +271,7 @@ class AudioContextManagerImpl {
    * Reset for testing purposes
    */
   _reset(): void {
+    this.removeResumeListeners();
     this._context = null;
     this._isResumeListenerAdded = false;
     this._resumePromise = null;

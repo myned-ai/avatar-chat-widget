@@ -13,6 +13,13 @@ import { logger } from '../utils/Logger';
 
 const log = logger.scope('LazyAvatar');
 
+/**
+ * Type for GaussianAvatar constructor (ensures type safety on dynamic import)
+ */
+type GaussianAvatarConstructor = new (container: HTMLDivElement, assetsPath: string) => IAvatarController & {
+  start?: () => Promise<void> | void;
+};
+
 export interface LazyAvatarOptions {
   /** Load immediately in background (default: true) */
   preload?: boolean;
@@ -24,12 +31,20 @@ export interface LazyAvatarOptions {
   onLoadingStart?: () => void;
 }
 
+/**
+ * Extended avatar controller type that includes optional start method
+ * GaussianAvatar implements this extended interface
+ */
+type AvatarControllerWithStart = IAvatarController & {
+  start?: () => Promise<void> | void;
+};
+
 export class LazyAvatar implements IAvatarController, Disposable {
   private _container: HTMLDivElement;
   private _assetsPath: string;
   private _options: LazyAvatarOptions;
   
-  private _avatar: IAvatarController | null = null;
+  private _avatar: AvatarControllerWithStart | null = null;
   private _isLoading = false;
   private _isLoaded = false;
   private _loadPromise: Promise<void> | null = null;
@@ -38,6 +53,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
   private _pendingState: ChatState = 'Idle';
   private _pendingBlendshapes: Record<string, number> | null = null;
   private _liveBlendshapesEnabled = false;
+  private _loadFailed = false;
   
   constructor(
     container: HTMLDivElement, 
@@ -103,6 +119,54 @@ export class LazyAvatar implements IAvatarController, Disposable {
       placeholder.remove();
     }
   }
+
+  /**
+   * Show error state when avatar fails to load
+   * Replaces the loading spinner with a user-friendly error message
+   */
+  private _showErrorState(error: Error): void {
+    this._removePlaceholder();
+    this._loadFailed = true;
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.id = 'avatar-error';
+    errorDiv.style.cssText = `
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+      color: #666;
+      font-family: system-ui, sans-serif;
+    `;
+    errorDiv.innerHTML = `
+      <div style="text-align: center; padding: 20px;">
+        <div style="
+          width: 60px;
+          height: 60px;
+          margin: 0 auto 16px;
+          background: #e0e0e0;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M8 15s1.5 2 4 2 4-2 4-2"/>
+            <circle cx="9" cy="9" r="1" fill="#999"/>
+            <circle cx="15" cy="9" r="1" fill="#999"/>
+          </svg>
+        </div>
+        <div style="font-size: 14px; font-weight: 500; margin-bottom: 4px;">Avatar unavailable</div>
+        <div style="font-size: 12px; opacity: 0.7;">Chat is still available below</div>
+      </div>
+    `;
+    this._container.appendChild(errorDiv);
+    
+    log.warn('Avatar load failed, showing fallback UI:', error.message);
+  }
   
   /**
    * Load the heavy avatar renderer
@@ -122,17 +186,20 @@ export class LazyAvatar implements IAvatarController, Disposable {
   private async _doLoad(): Promise<void> {
     try {
       // Dynamic import - this creates the separate chunk
-      const { GaussianAvatar } = await import('./GaussianAvatar');
+      const module = await import('./GaussianAvatar');
+      
+      // Type-safe cast: GaussianAvatar must implement IAvatarController
+      const GaussianAvatarClass = module.GaussianAvatar as GaussianAvatarConstructor;
       
       // Remove placeholder before creating avatar
       this._removePlaceholder();
       
-      // Create the actual avatar
-      this._avatar = new GaussianAvatar(this._container, this._assetsPath);
+      // Create the actual avatar (now properly typed)
+      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath);
       
-      // Start rendering - this creates the canvas (await it!)
-      if ('start' in this._avatar && typeof (this._avatar as { start?: () => Promise<void> }).start === 'function') {
-        await (this._avatar as { start: () => Promise<void> }).start();
+      // Start rendering if the avatar has a start method
+      if (this._avatar.start) {
+        await this._avatar.start();
       }
       
       // Apply any pending state
@@ -155,9 +222,13 @@ export class LazyAvatar implements IAvatarController, Disposable {
     } catch (error) {
       this._isLoading = false;
       const err = error instanceof Error ? error : new Error(String(error));
+      
+      // Show fallback UI instead of permanent spinner
+      this._showErrorState(err);
+      
       this._options.onError?.(err);
       log.error('Failed to load avatar:', err);
-      throw err;
+      // Don't re-throw - we've handled it gracefully with fallback UI
     }
   }
   
@@ -166,8 +237,9 @@ export class LazyAvatar implements IAvatarController, Disposable {
    */
   public start(): void {
     if (this._avatar) {
-      if ('start' in this._avatar && typeof (this._avatar as { start?: () => void }).start === 'function') {
-        (this._avatar as { start: () => void }).start();
+      // _avatar is typed as AvatarControllerWithStart which has optional start()
+      if (this._avatar.start) {
+        this._avatar.start();
       }
     } else {
       // Will start automatically when loaded
@@ -215,24 +287,30 @@ export class LazyAvatar implements IAvatarController, Disposable {
   }
 
   public pause(): void {
-    if (this._avatar && 'pause' in this._avatar && typeof (this._avatar as { pause?: () => void }).pause === 'function') {
-      (this._avatar as { pause: () => void }).pause();
+    if (this._avatar?.pause) {
+      this._avatar.pause();
     }
   }
 
   public resume(): void {
-    if (this._avatar && 'resume' in this._avatar && typeof (this._avatar as { resume?: () => void }).resume === 'function') {
-      (this._avatar as { resume: () => void }).resume();
+    if (this._avatar?.resume) {
+      this._avatar.resume();
     }
   }
   
   public dispose(): void {
     this._removePlaceholder();
+    // Also remove error state if present
+    const errorEl = this._container.querySelector('#avatar-error');
+    if (errorEl) {
+      errorEl.remove();
+    }
     if (this._avatar) {
       this._avatar.dispose();
     }
     this._avatar = null;
     this._isLoaded = false;
+    this._loadFailed = false;
   }
   
   // === Getters ===

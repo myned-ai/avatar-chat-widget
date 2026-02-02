@@ -52,9 +52,34 @@ export type { AvatarChatConfig, AvatarChatInstance } from './widget/types';
 
 import { DEFAULT_CONFIG as BASE_DEFAULT_CONFIG, AvatarChatConfig, AvatarChatInstance } from './widget/types';
 
+/**
+ * Detect the base URL for assets by checking script tags
+ * Returns the base URL where assets should be loaded from
+ */
+function detectAssetsBaseUrl(): string {
+  const scripts = document.getElementsByTagName('script');
+  for (let i = 0; i < scripts.length; i++) {
+    const src = scripts[i].src;
+    // Check for CDN usage (jsdelivr or unpkg)
+    if (src.includes('jsdelivr.net') && src.includes('avatar-chat-widget')) {
+      return src.substring(0, src.lastIndexOf('/')) + '/public';
+    }
+    if (src.includes('unpkg.com') && src.includes('avatar-chat-widget')) {
+      return src.substring(0, src.lastIndexOf('/')) + '/public';
+    }
+    // Check if loaded from a custom path (not CDN)
+    if (src.includes('avatar-chat-widget') && !src.includes('localhost')) {
+      return src.substring(0, src.lastIndexOf('/'));
+    }
+  }
+  // Fallback for local development or npm usage
+  return '';
+}
+
 const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   ...BASE_DEFAULT_CONFIG,
-  avatarUrl: './asset/nyx.zip', // Override for local dev compatibility
+  // avatarUrl will be resolved dynamically using assetsBaseUrl
+  avatarUrl: undefined,
 };
 
 // ============================================================================
@@ -161,8 +186,12 @@ class AvatarChatElement extends HTMLElement {
     // Add widget HTML
     const container = document.createElement('div');
     container.innerHTML = WIDGET_TEMPLATE;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Template always has root element
-    const root = container.firstElementChild!;
+    const root = container.firstElementChild;
+    
+    if (!root) {
+      log.error('Failed to create widget root element from template');
+      return;
+    }
 
     // Apply theme
     if (this.config.theme === 'dark') {
@@ -208,7 +237,12 @@ class AvatarChatElement extends HTMLElement {
 
     const container = document.createElement('div');
     container.innerHTML = BUBBLE_TEMPLATE;
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild;
+    
+    if (!wrapper) {
+      log.error('Failed to create bubble wrapper from template');
+      return;
+    }
     
     // Attach events to actual bubble element
     const bubble = wrapper.querySelector('#chatBubble');
@@ -255,12 +289,15 @@ class AvatarChatElement extends HTMLElement {
     renderContainer.className = 'avatar-render-container';
     avatarContainer.appendChild(renderContainer);
 
+    // Resolve avatar URL: use config value or construct from assets base URL
+    const resolvedAvatarUrl = this.resolveAvatarUrl();
+
     try {
       this.avatar = new LazyAvatar(
         renderContainer as HTMLDivElement,
-        this.config.avatarUrl || './asset/nyx.zip',
+        resolvedAvatarUrl,
         {
-          preload: true,
+          preload: false, // Changed: defer loading for better Core Web Vitals
           onReady: () => log.info('Avatar loaded'),
           onError: (err) => {
             log.error('Avatar load error:', err);
@@ -273,6 +310,43 @@ class AvatarChatElement extends HTMLElement {
       log.error('Failed to initialize avatar:', error);
       this.config.onError?.(error as Error);
     }
+  }
+
+  /**
+   * Resolve the avatar URL from config or assets base URL
+   * Ensures we always have an absolute URL that works across different deployment scenarios
+   */
+  private resolveAvatarUrl(): string {
+    // If user provided a full URL, use it directly
+    if (this.config.avatarUrl) {
+      const url = this.config.avatarUrl;
+      // Check if it's already an absolute URL
+      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
+        return url;
+      }
+      // Check if assetsBaseUrl is configured
+      if (this.config.assetsBaseUrl) {
+        return `${this.config.assetsBaseUrl.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      // For relative paths, try to detect base URL
+      const detectedBase = detectAssetsBaseUrl();
+      if (detectedBase) {
+        return `${detectedBase}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      // Fallback: return as-is (works for local dev)
+      return url;
+    }
+    
+    // No avatarUrl provided, use default with detected or configured base
+    const baseUrl = this.config.assetsBaseUrl || detectAssetsBaseUrl();
+    const defaultPath = '/asset/nyx.zip';
+    
+    if (baseUrl) {
+      return `${baseUrl.replace(/\/$/, '')}${defaultPath}`;
+    }
+    
+    // Final fallback for local development
+    return defaultPath;
   }
 
   /**
@@ -818,6 +892,28 @@ export const AvatarChat = {
       }
     }
 
+    // Validate suggestions array if provided
+    if (config.suggestions !== undefined) {
+      if (!Array.isArray(config.suggestions)) {
+        throw new Error('AvatarChat.init(): suggestions must be an array of strings');
+      }
+      if (config.suggestions.some(s => typeof s !== 'string')) {
+        throw new Error('AvatarChat.init(): all suggestions must be strings');
+      }
+      // Limit suggestion count and length to prevent abuse
+      if (config.suggestions.length > 10) {
+        throw new Error('AvatarChat.init(): maximum 10 suggestions allowed');
+      }
+      if (config.suggestions.some(s => s.length > 200)) {
+        throw new Error('AvatarChat.init(): suggestion text must be 200 characters or less');
+      }
+    }
+
+    // Validate customStyles if provided (basic check - CSS is sandboxed in Shadow DOM)
+    if (config.customStyles !== undefined && typeof config.customStyles !== 'string') {
+      throw new Error('AvatarChat.init(): customStyles must be a string');
+    }
+
     // Validate callbacks if provided
     if (config.onReady !== undefined && typeof config.onReady !== 'function') {
       throw new Error('AvatarChat.init(): onReady must be a function');
@@ -829,6 +925,21 @@ export const AvatarChat = {
 
     if (config.onError !== undefined && typeof config.onError !== 'function') {
       throw new Error('AvatarChat.init(): onError must be a function');
+    }
+
+    // Validate avatarUrl if provided (must be a URL or relative path ending in .zip)
+    if (config.avatarUrl !== undefined) {
+      if (typeof config.avatarUrl !== 'string') {
+        throw new Error('AvatarChat.init(): avatarUrl must be a string');
+      }
+      // Must end with .zip and not contain dangerous characters
+      if (!config.avatarUrl.endsWith('.zip')) {
+        throw new Error('AvatarChat.init(): avatarUrl must be a .zip file');
+      }
+      // Prevent path traversal attacks
+      if (config.avatarUrl.includes('..')) {
+        throw new Error('AvatarChat.init(): avatarUrl cannot contain path traversal');
+      }
     }
 
     // Validate logLevel if provided
