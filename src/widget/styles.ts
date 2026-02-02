@@ -11,14 +11,18 @@
  */
 
 export const WIDGET_STYLES = `
-/* Import Inter font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap');
+/* 
+ * System font stack for CSP compliance
+ * Avoids @import which violates Content-Security-Policy on strict sites
+ * Falls back gracefully across all platforms
+ */
 
 /* Reset all inherited styles */
 :host {
   all: initial;
   display: block;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  /* System font stack - CSP compliant, no external font loading */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   font-size: 13px;
   font-weight: 400;
   line-height: 1.5;

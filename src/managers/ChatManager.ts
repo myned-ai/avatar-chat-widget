@@ -81,6 +81,10 @@ export class ChatManager implements Disposable {
   private autoScrollObserver: MutationObserver | null = null;
   private useSyncPlayback = false;
 
+  // Event listener references for cleanup (prevents memory leaks in SPAs)
+  private keypressHandler: ((e: KeyboardEvent) => void) | null = null;
+  private micClickHandler: (() => void) | null = null;
+
   // Options & Callbacks
   private options: ChatManagerOptions;
 
@@ -97,13 +101,27 @@ export class ChatManager implements Disposable {
     this.blendshapeBuffer = new BlendshapeBuffer();
     this.syncPlayback = new SyncPlayback();
     
-    // Get UI elements
+    // Get UI elements with proper null checks
     const root = options.shadowRoot || document;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- DOM element guaranteed by template
-    this.chatMessages = options.chatMessages || root.getElementById('chatMessages')!;
-    this.chatInput = (options.chatInput || root.getElementById('chatInput')) as HTMLInputElement;
-    this.micBtn = (options.micBtn || root.getElementById('micBtn')) as HTMLButtonElement;
-    this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement;
+    
+    const chatMessagesEl = options.chatMessages || root.getElementById('chatMessages');
+    const chatInputEl = options.chatInput || root.getElementById('chatInput');
+    const micBtnEl = options.micBtn || root.getElementById('micBtn');
+    
+    if (!chatMessagesEl) {
+      throw new Error('ChatManager: chatMessages element not found');
+    }
+    if (!chatInputEl) {
+      throw new Error('ChatManager: chatInput element not found');
+    }
+    if (!micBtnEl) {
+      throw new Error('ChatManager: micBtn element not found');
+    }
+    
+    this.chatMessages = chatMessagesEl;
+    this.chatInput = chatInputEl as HTMLInputElement;
+    this.micBtn = micBtnEl as HTMLButtonElement;
+    this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement | null;
 
     // Initialize extracted modules
     this.subtitleController = new SubtitleController({
@@ -203,6 +221,16 @@ export class ChatManager implements Disposable {
       this.autoScrollObserver = null;
     }
 
+    // Clean up DOM event listeners to prevent memory leaks
+    if (this.keypressHandler && this.chatInput) {
+      this.chatInput.removeEventListener('keypress', this.keypressHandler);
+      this.keypressHandler = null;
+    }
+    if (this.micClickHandler && this.micBtn) {
+      this.micBtn.removeEventListener('click', this.micClickHandler);
+      this.micClickHandler = null;
+    }
+
     // Dispose extracted modules
     this.subtitleController.dispose();
     this.transcriptManager.dispose();
@@ -250,13 +278,16 @@ export class ChatManager implements Disposable {
   }
 
   private setupEventListeners(): void {
-    this.chatInput.addEventListener('keypress', (e) => {
+    // Store references for cleanup
+    this.keypressHandler = (e: KeyboardEvent) => {
       if (e.key === 'Enter') this.sendTextMessage();
-    });
-    
-    this.micBtn.addEventListener('click', () => {
+    };
+    this.micClickHandler = () => {
       this.voiceController.toggle();
-    });
+    };
+
+    this.chatInput.addEventListener('keypress', this.keypressHandler);
+    this.micBtn.addEventListener('click', this.micClickHandler);
     
     // Standalone mode handlers
     if (!this.options.shadowRoot) {

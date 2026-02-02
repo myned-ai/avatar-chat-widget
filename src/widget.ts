@@ -52,9 +52,34 @@ export type { AvatarChatConfig, AvatarChatInstance } from './widget/types';
 
 import { DEFAULT_CONFIG as BASE_DEFAULT_CONFIG, AvatarChatConfig, AvatarChatInstance } from './widget/types';
 
+/**
+ * Detect the base URL for assets by checking script tags
+ * Returns the base URL where assets should be loaded from
+ */
+function detectAssetsBaseUrl(): string {
+  const scripts = document.getElementsByTagName('script');
+  for (let i = 0; i < scripts.length; i++) {
+    const src = scripts[i].src;
+    // Check for CDN usage (jsdelivr or unpkg)
+    if (src.includes('jsdelivr.net') && src.includes('avatar-chat-widget')) {
+      return src.substring(0, src.lastIndexOf('/')) + '/public';
+    }
+    if (src.includes('unpkg.com') && src.includes('avatar-chat-widget')) {
+      return src.substring(0, src.lastIndexOf('/')) + '/public';
+    }
+    // Check if loaded from a custom path (not CDN)
+    if (src.includes('avatar-chat-widget') && !src.includes('localhost')) {
+      return src.substring(0, src.lastIndexOf('/'));
+    }
+  }
+  // Fallback for local development or npm usage
+  return '';
+}
+
 const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   ...BASE_DEFAULT_CONFIG,
-  avatarUrl: './asset/nyx.zip', // Override for local dev compatibility
+  // avatarUrl will be resolved dynamically using assetsBaseUrl
+  avatarUrl: undefined,
 };
 
 // ============================================================================
@@ -161,8 +186,12 @@ class AvatarChatElement extends HTMLElement {
     // Add widget HTML
     const container = document.createElement('div');
     container.innerHTML = WIDGET_TEMPLATE;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Template always has root element
-    const root = container.firstElementChild!;
+    const root = container.firstElementChild;
+    
+    if (!root) {
+      log.error('Failed to create widget root element from template');
+      return;
+    }
 
     // Apply theme
     if (this.config.theme === 'dark') {
@@ -208,8 +237,12 @@ class AvatarChatElement extends HTMLElement {
 
     const container = document.createElement('div');
     container.innerHTML = BUBBLE_TEMPLATE;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- BUBBLE_TEMPLATE always has root element
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild;
+    
+    if (!wrapper) {
+      log.error('Failed to create bubble wrapper from template');
+      return;
+    }
     
     // Attach events to actual bubble element
     const bubble = wrapper.querySelector('#chatBubble');
@@ -256,12 +289,15 @@ class AvatarChatElement extends HTMLElement {
     renderContainer.className = 'avatar-render-container';
     avatarContainer.appendChild(renderContainer);
 
+    // Resolve avatar URL: use config value or construct from assets base URL
+    const resolvedAvatarUrl = this.resolveAvatarUrl();
+
     try {
       this.avatar = new LazyAvatar(
         renderContainer as HTMLDivElement,
-        this.config.avatarUrl || './asset/nyx.zip',
+        resolvedAvatarUrl,
         {
-          preload: true,
+          preload: false, // Changed: defer loading for better Core Web Vitals
           onReady: () => log.info('Avatar loaded'),
           onError: (err) => {
             log.error('Avatar load error:', err);
@@ -274,6 +310,43 @@ class AvatarChatElement extends HTMLElement {
       log.error('Failed to initialize avatar:', error);
       this.config.onError?.(error as Error);
     }
+  }
+
+  /**
+   * Resolve the avatar URL from config or assets base URL
+   * Ensures we always have an absolute URL that works across different deployment scenarios
+   */
+  private resolveAvatarUrl(): string {
+    // If user provided a full URL, use it directly
+    if (this.config.avatarUrl) {
+      const url = this.config.avatarUrl;
+      // Check if it's already an absolute URL
+      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
+        return url;
+      }
+      // Check if assetsBaseUrl is configured
+      if (this.config.assetsBaseUrl) {
+        return `${this.config.assetsBaseUrl.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      // For relative paths, try to detect base URL
+      const detectedBase = detectAssetsBaseUrl();
+      if (detectedBase) {
+        return `${detectedBase}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      // Fallback: return as-is (works for local dev)
+      return url;
+    }
+    
+    // No avatarUrl provided, use default with detected or configured base
+    const baseUrl = this.config.assetsBaseUrl || detectAssetsBaseUrl();
+    const defaultPath = '/asset/nyx.zip';
+    
+    if (baseUrl) {
+      return `${baseUrl.replace(/\/$/, '')}${defaultPath}`;
+    }
+    
+    // Final fallback for local development
+    return defaultPath;
   }
 
   /**
