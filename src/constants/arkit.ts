@@ -30,9 +30,9 @@ export function createNeutralWeights(): Record<string, number> {
     weights[name] = 0;
   }
   // Add a subtle smile to the neutral expression
-  weights['mouthSmileLeft'] = 0.40;
-  weights['mouthSmileRight'] = 0.40;
-  weights['jawOpen'] = 0.05;
+  weights['mouthSmileLeft'] = 0.20;
+  weights['mouthSmileRight'] = 0.20;
+  weights['jawOpen'] = 0.02;
 
   return weights;
 }
