@@ -106,8 +106,6 @@ class AvatarChatElement extends HTMLElement {
   private _isMounted = false;
   private _isConnected = false;
   private _isCollapsed = false;
-  private themeMediaQuery: MediaQueryList | null = null;
-  private themeChangeHandler: ((e: MediaQueryListEvent) => void) | null = null;
 
   constructor() {
     super();
@@ -191,15 +189,6 @@ class AvatarChatElement extends HTMLElement {
     if (!root) {
       log.error('Failed to create widget root element from template');
       return;
-    }
-
-    // Apply theme
-    if (this.config.theme === 'dark') {
-      root.classList.add('theme-dark');
-    } else if (this.config.theme === 'auto') {
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        root.classList.add('theme-dark');
-      }
     }
 
     this.shadow.appendChild(root);
@@ -433,16 +422,6 @@ class AvatarChatElement extends HTMLElement {
     // Minimize button
     const minimizeBtn = this.shadow.getElementById('minimizeBtn');
     minimizeBtn?.addEventListener('click', () => this.collapse());
-
-    // Auto-theme listener with proper cleanup
-    if (this.config.theme === 'auto') {
-      this.themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      this.themeChangeHandler = (e) => {
-        const root = this.shadow.querySelector('.widget-root');
-        root?.classList.toggle('theme-dark', e.matches);
-      };
-      this.themeMediaQuery.addEventListener('change', this.themeChangeHandler);
-    }
 
     // Input Interaction Logic (Voice Priority)
     const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
@@ -769,13 +748,6 @@ class AvatarChatElement extends HTMLElement {
    * Internal cleanup logic (shared by destroy() and disconnectedCallback())
    */
   private cleanup(): void {
-    // Remove theme listener to prevent memory leak
-    if (this.themeMediaQuery && this.themeChangeHandler) {
-      this.themeMediaQuery.removeEventListener('change', this.themeChangeHandler);
-      this.themeMediaQuery = null;
-      this.themeChangeHandler = null;
-    }
-
     // Cleanup drawer controller event listeners
     if (this.drawerController) {
       this.drawerController.destroy();
@@ -949,14 +921,6 @@ export const AvatarChat = {
       const validLogLevels = ['none', 'error', 'warn', 'info', 'debug'];
       if (!validLogLevels.includes(config.logLevel)) {
         throw new Error(`AvatarChat.init(): logLevel must be one of: ${validLogLevels.join(', ')}`);
-      }
-    }
-
-    // Validate theme if provided
-    if (config.theme !== undefined) {
-      const validThemes = ['light', 'dark', 'auto'];
-      if (!validThemes.includes(config.theme)) {
-        throw new Error(`AvatarChat.init(): theme must be one of: ${validThemes.join(', ')}`);
       }
     }
 

@@ -29,6 +29,11 @@ export function createNeutralWeights(): Record<string, number> {
   for (const name of ARKIT_BLENDSHAPE_NAMES) {
     weights[name] = 0;
   }
+  // Add a subtle smile to the neutral expression
+  weights['mouthSmileLeft'] = 0.40;
+  weights['mouthSmileRight'] = 0.40;
+  weights['jawOpen'] = 0.05;
+
   return weights;
 }
 
