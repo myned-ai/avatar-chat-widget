@@ -228,6 +228,9 @@ export class TranscriptManager implements Disposable {
       sender: 'assistant',
       timestamp: Date.now(),
     };
+    
+    log.info(` TURN END [assistant] | Full text: "${this.currentAssistantTurnText}"`);
+    
     this.messages.push(msg);
     this.options.onMessage?.({ role: 'assistant', text: this.currentAssistantTurnText });
 

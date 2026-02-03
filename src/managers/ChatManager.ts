@@ -384,11 +384,12 @@ export class ChatManager implements Disposable {
 
   private handleAudioStart(event: AudioStartEvent): void {
     this.setTyping(false);
-    log.info('[AUDIO] Audio start received:', event.turnId, 'sessionId:', event.sessionId);
     
     this.currentTurnId = event.turnId;
     this.currentSessionId = event.sessionId;
     this.turnStartTime = Date.now();
+    
+    log.info(` TURN START [assistant] turnId=${event.turnId} sessionId=${event.sessionId}`);
     
     // Reset transcript queue, subtitle, and transcript state for new assistant turn
     log.debug(`[AUDIO] Resetting queue (had ${this.transcriptQueue.length} items)`);
@@ -522,13 +523,16 @@ export class ChatManager implements Disposable {
     
     const playbackState = this.syncPlayback.getState();
     const msPlayed = playbackState.audioPlaybackTime * 1000;
+    const turnDurationMs = Date.now() - this.turnStartTime;
+    
+    log.info(` INTERRUPT turnId=${event.turnId} | cutoffOffset=${event.offsetMs}ms | audioPlayed=${msPlayed.toFixed(0)}ms | turnDuration=${turnDurationMs}ms`);
     
     if (msPlayed >= event.offsetMs) {
-      log.info(`Interruption: Immediate Stop`);
+      log.info(`  → Immediate stop (already past cutoff)`);
       this.stopAllPlayback();
     } else {
       const remainingMs = event.offsetMs - msPlayed;
-      log.info(`Interruption: Scheduled Stop in ${remainingMs.toFixed(0)}ms`);
+      log.info(`  → Scheduled stop in ${remainingMs.toFixed(0)}ms`);
       setTimeout(() => this.stopAllPlayback(), remainingMs);
     }
   }
@@ -541,6 +545,8 @@ export class ChatManager implements Disposable {
     const text = this.chatInput.value.trim();
     if (!text) return;
 
+    log.info(` TURN START [user] | Text: "${text}"`);
+    
     this.chatInput.value = '';
     this.avatar.setChatState('Hello');
     this.transcriptManager.addMessage(text, 'user');
