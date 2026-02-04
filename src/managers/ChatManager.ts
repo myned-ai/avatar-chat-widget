@@ -68,6 +68,18 @@ export class ChatManager implements Disposable {
   private currentTurnId: string | null = null;
   private turnStartTime: number = 0;
   private userId: string;
+  private audioStartReceived: boolean = false;
+  private syncFramesBeforeStart: number = 0;
+  private wasInterrupted: boolean = false;
+  private interruptCutoffMs: number | null = null; // Cutoff offset when interrupted
+  private scheduledStopTimeout: number | null = null; // Timeout for delayed stopAllPlayback after interrupt
+  
+  // Track rendered user messages to prevent duplicates from transcript_done echoes
+  private renderedUserMessageIds: Set<string> = new Set();
+  // Track the last user turn ID for deduplication
+  private lastUserTurnId: string | null = null;
+  // Track if user sent a text message (to avoid duplicate rendering from server echo)
+  private pendingUserTextMessage: boolean = false;
 
   // UI Elements
   private chatMessages: HTMLElement;
@@ -90,11 +102,18 @@ export class ChatManager implements Disposable {
     role: 'user' | 'assistant';
   }> = [];
   
+  // Track displayed words with their offsets for interrupt truncation
+  private displayedWords: Array<{ text: string; offset: number }> = [];
+  
   // Counter for words that have been displayed but not yet marked as spoken in subtitles
   private wordsSpokenCount: number = 0;
   
   // Base offset for the current turn (first startOffset received, used to normalize offsets per turn)
   private turnBaseOffset: number | null = null;
+  
+  // Buffer for transcript_delta events that arrive before audio_start
+  // These are processed once audio_start is received to prevent orphaned bubbles
+  private earlyTranscriptBuffer: TranscriptDeltaEvent[] = [];
 
   // Event listener references for cleanup (prevents memory leaks in SPAs)
   private keypressHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -275,12 +294,18 @@ export class ChatManager implements Disposable {
     this.syncPlayback.setPlaybackEndCallback(() => {
       log.info('SyncPlayback ended - transitioning to Idle');
       
-      // Flush any remaining queued transcript items
-      while (this.transcriptQueue.length > 0) {
-        const item = this.transcriptQueue.shift();
-        if (item?.role === 'assistant') {
-          this.transcriptManager.appendToAssistantTurn(item.text);
+      // Only flush remaining transcript if NOT interrupted
+      // On interrupt, we want to show only what was actually spoken
+      if (!this.wasInterrupted) {
+        while (this.transcriptQueue.length > 0) {
+          const item = this.transcriptQueue.shift();
+          if (item?.role === 'assistant') {
+            this.transcriptManager.appendToAssistantTurn(item.text);
+          }
         }
+      } else {
+        // Clear the queue without displaying
+        this.transcriptQueue = [];
       }
       
       this.avatar.setChatState('Idle');
@@ -385,15 +410,32 @@ export class ChatManager implements Disposable {
   private handleAudioStart(event: AudioStartEvent): void {
     this.setTyping(false);
     
+    // Check if sync_frames arrived before audio_start
+    if (this.syncFramesBeforeStart > 0) {
+      log.warn(`⚠️ Received ${this.syncFramesBeforeStart} sync_frames BEFORE audio_start!`);
+    }
+    
     this.currentTurnId = event.turnId;
     this.currentSessionId = event.sessionId;
     this.turnStartTime = Date.now();
+    this.audioStartReceived = true;
+    this.syncFramesBeforeStart = 0;
+    this.wasInterrupted = false;
+    this.interruptCutoffMs = null; // Reset interrupt cutoff for new turn
     
-    log.info(` TURN START [assistant] turnId=${event.turnId} sessionId=${event.sessionId}`);
+    // Cancel any pending scheduled stopAllPlayback from previous interrupted turn
+    if (this.scheduledStopTimeout !== null) {
+      clearTimeout(this.scheduledStopTimeout);
+      this.scheduledStopTimeout = null;
+      log.debug('Cancelled pending scheduled stopAllPlayback from previous turn');
+    }
+    
+    log.info(`📢 TURN START [assistant] turnId=${event.turnId} sessionId=${event.sessionId}`);
     
     // Reset transcript queue, subtitle, and transcript state for new assistant turn
     log.debug(`[AUDIO] Resetting queue (had ${this.transcriptQueue.length} items)`);
     this.transcriptQueue = [];
+    this.displayedWords = []; // Reset displayed words tracking for new turn
     this.wordsSpokenCount = 0;
     this.turnBaseOffset = null; // Reset base offset for new turn
     log.debug('[AUDIO] Calling subtitleController.reset()');
@@ -408,11 +450,32 @@ export class ChatManager implements Disposable {
     this.useSyncPlayback = false;
     this.avatar.enableLiveBlendshapes();
     this.avatar.setChatState('Responding');
+    
+    // Process any transcript_deltas that arrived before audio_start
+    if (this.earlyTranscriptBuffer.length > 0) {
+      log.debug(`[AUDIO] Processing ${this.earlyTranscriptBuffer.length} buffered early transcript_deltas`);
+      for (const event of this.earlyTranscriptBuffer) {
+        this.handleTranscriptDelta(event);
+      }
+      this.earlyTranscriptBuffer = [];
+    }
   }
 
   private handleSyncFrame(event: SyncFrameEvent): void {
+    // Check if sync_frame arrived before audio_start (only log first occurrence)
+    if (!this.audioStartReceived) {
+      this.syncFramesBeforeStart++;
+      if (this.syncFramesBeforeStart === 1) {
+        log.warn(`⚠️ sync_frame received BEFORE audio_start!`);
+      }
+    }
+    
+    // Handle session ID mismatch (server may use different ID sources for audio_start vs sync_frame)
     if (event.sessionId && event.sessionId !== this.currentSessionId) {
-      log.warn('Implicit session start via sync_frame');
+      if (this.currentSessionId) {
+        // Log mismatch but adapt to the sync_frame's session ID (it's what the audio uses)
+        log.debug(`Session ID mismatch: audio_start=${this.currentSessionId}, sync_frame=${event.sessionId} - adapting to sync_frame`);
+      }
       this.currentSessionId = event.sessionId;
       this.syncPlayback.startSession(event.sessionId);
       this.avatar.enableLiveBlendshapes();
@@ -439,6 +502,9 @@ export class ChatManager implements Disposable {
   private handleAudioEnd(event: AudioEndEvent): void {
     log.info('Audio end received - marking stream complete');
     
+    // Reset for next turn
+    this.audioStartReceived = false;
+    
     if (this.useSyncPlayback) {
       this.syncPlayback.endSession(event.sessionId);
     } else {
@@ -448,9 +514,22 @@ export class ChatManager implements Disposable {
   }
 
   private handleTranscriptDelta(event: TranscriptDeltaEvent): void {
-    const { role, text, itemId, previousItemId, startOffset } = event;
+    const { role, text, itemId, previousItemId, startOffset, turnId } = event;
     
-    // DEBUG: Log incoming transcript delta
+    // Ignore transcript deltas from stale turns
+    if (turnId && this.currentTurnId && turnId !== this.currentTurnId) {
+      log.debug(`Ignoring stale transcript_delta for turn ${turnId} (current: ${this.currentTurnId})`);
+      return;
+    }
+    
+    // Buffer assistant transcript_deltas that arrive BEFORE audio_start
+    // This prevents orphaned bubbles when clear() is called on audio_start
+    if (role === 'assistant' && !this.audioStartReceived) {
+      log.debug(`[TRANSCRIPT] Buffering early delta (before audio_start): "${text}"`);
+      this.earlyTranscriptBuffer.push(event);
+      return;
+    }
+    
     log.debug(`[TRANSCRIPT] Delta received: role=${role}, text="${text}", startOffset=${startOffset}ms`);
     
     if (role === 'assistant') {
@@ -468,16 +547,18 @@ export class ChatManager implements Disposable {
         log.debug(`[TRANSCRIPT] Normalized offset: ${startOffset}ms - ${this.turnBaseOffset}ms = ${normalizedOffset}ms`);
         
         // Queue for synced display with audio playback time
-        // User messages with 0 offset show immediately
+        // Words with 0 or negative offset show immediately
         if (normalizedOffset <= 0) {
           this.transcriptManager.appendToAssistantTurn(text);
+          this.displayedWords.push({ text, offset: normalizedOffset });
           this.subtitleController.markWordSpoken();
         } else {
           this.transcriptQueue.push({ text, role, itemId, previousItemId, startOffset: normalizedOffset });
         }
       } else {
-        // No startOffset - display immediately (fallback for legacy)
+        // No startOffset - display immediately (fallback for legacy, use 0 as offset)
         this.transcriptManager.appendToAssistantTurn(text);
+        this.displayedWords.push({ text, offset: 0 });
         this.subtitleController.markWordSpoken();
       }
     } else if (role === 'user') {
@@ -493,10 +574,23 @@ export class ChatManager implements Disposable {
   }
 
   private handleTranscriptDone(event: TranscriptDoneEvent): void {
-    log.debug(`Transcript done [${event.role}]: ${event.text}`);
+    log.debug(`Transcript done [${event.role}]: ${event.text} turnId=${event.turnId}`);
     
     if (event.role === 'assistant') {
+      // Ignore transcript_done from stale turns (e.g., from previous interrupted turn)
+      if (event.turnId && this.currentTurnId && event.turnId !== this.currentTurnId) {
+        log.debug(`Ignoring stale transcript_done for turn ${event.turnId} (current: ${this.currentTurnId})`);
+        return;
+      }
+      
+      // If this turn was interrupted, the bubble was already finalized with spoken text only
+      if (this.wasInterrupted) {
+        log.debug(`Ignoring transcript_done for interrupted turn`);
+        return;
+      }
+      
       if (event.interrupted) {
+        // Server sent truncated text for interrupted turn
         this.transcriptManager.replaceAssistantTurnText(event.text);
       }
       // Don't finalize if queue still has items - let playbackEnd handle it
@@ -507,34 +601,83 @@ export class ChatManager implements Disposable {
       }
       // If queue has items, finalization happens in setPlaybackEndCallback
     } else {
-      if (!this.transcriptManager.hasActiveAssistantTurn()) {
-        this.transcriptManager.addMessage(event.text, event.role);
+      // User messages handling:
+      // - If user TYPED a message, we already rendered it in sendTextMessage(), skip the echo
+      // - If user SPOKE (voice input), we need to render the server's transcript
+      if (this.pendingUserTextMessage) {
+        log.debug(`Ignoring user transcript_done echo (text was rendered locally)`);
+        this.pendingUserTextMessage = false; // Reset for next message
       } else {
-        this.transcriptManager.finalizeMessage(event.itemId, event.role, event.interrupted);
+        // Voice input - render the transcribed user speech
+        // Insert BEFORE assistant bubble since voice chronologically occurred before assistant started
+        log.info(`📤 TURN [user] | Voice transcript: "${event.text}"`);
+        this.transcriptManager.addMessage(event.text, 'user', true);
       }
     }
   }
 
   private handleInterrupt(event: InterruptEvent): void {
-    if (this.currentTurnId !== event.turnId) {
-      log.debug(`Ignoring interrupt for non-active turn`);
+    // Ignore interrupts with null turnId or for non-active turns
+    if (!event.turnId || this.currentTurnId !== event.turnId) {
+      log.debug(`Ignoring interrupt: turnId=${event.turnId} (current: ${this.currentTurnId})`);
       return;
     }
     
     const playbackState = this.syncPlayback.getState();
     const msPlayed = playbackState.audioPlaybackTime * 1000;
     const turnDurationMs = Date.now() - this.turnStartTime;
+    const cutoffMs = event.offsetMs;
     
-    log.info(` INTERRUPT turnId=${event.turnId} | cutoffOffset=${event.offsetMs}ms | audioPlayed=${msPlayed.toFixed(0)}ms | turnDuration=${turnDurationMs}ms`);
+    log.info(`⛔ INTERRUPT turnId=${event.turnId} | cutoffOffset=${cutoffMs}ms | audioPlayed=${msPlayed.toFixed(0)}ms | turnDuration=${turnDurationMs}ms`);
     
-    if (msPlayed >= event.offsetMs) {
+    // Set interrupt flag and cutoff IMMEDIATELY to stop queue processing beyond this point
+    this.wasInterrupted = true;
+    this.interruptCutoffMs = cutoffMs;
+    
+    if (msPlayed >= cutoffMs) {
       log.info(`  → Immediate stop (already past cutoff)`);
       this.stopAllPlayback();
     } else {
-      const remainingMs = event.offsetMs - msPlayed;
+      const remainingMs = cutoffMs - msPlayed;
       log.info(`  → Scheduled stop in ${remainingMs.toFixed(0)}ms`);
-      setTimeout(() => this.stopAllPlayback(), remainingMs);
+      // Track the timeout so it can be cancelled if a new turn starts
+      this.scheduledStopTimeout = window.setTimeout(() => {
+        this.scheduledStopTimeout = null;
+        this.stopAllPlayback();
+      }, remainingMs);
     }
+  }
+  
+  /**
+   * Truncate the assistant transcript to only include words spoken before the cutoff offset.
+   * 
+   * Note: startOffset is when a word STARTS being spoken. We add a tolerance buffer
+   * to include words that started slightly before the cutoff, since they were likely
+   * fully or mostly spoken before the user interrupted.
+   */
+  private truncateTranscriptAtOffset(cutoffMs: number): void {
+    // Add tolerance for word duration - a word that starts 300ms before cutoff was likely spoken
+    // This accounts for average word duration in speech (~200-400ms per word)
+    const WORD_DURATION_TOLERANCE_MS = 300;
+    const effectiveCutoff = cutoffMs + WORD_DURATION_TOLERANCE_MS;
+    
+    // Filter displayed words to only those that started before the effective cutoff
+    const spokenWords = this.displayedWords.filter(w => w.offset < effectiveCutoff);
+    
+    log.info(`  → Truncating transcript: ${this.displayedWords.length} words → ${spokenWords.length} words (cutoff: ${cutoffMs}ms + ${WORD_DURATION_TOLERANCE_MS}ms tolerance)`);
+    
+    if (spokenWords.length === 0) {
+      // Nothing was spoken - clear the assistant bubble entirely
+      this.transcriptManager.replaceAssistantTurnText('');
+    } else if (spokenWords.length < this.displayedWords.length) {
+      // Some words were cut off - rebuild the text from spoken words only
+      const truncatedText = spokenWords.map(w => w.text).join(' ');
+      this.transcriptManager.replaceAssistantTurnText(truncatedText);
+    }
+    // If all words were spoken, leave the text as-is
+    
+    // Update displayedWords to only contain spoken words
+    this.displayedWords = spokenWords;
   }
 
   // ============================================================================
@@ -545,7 +688,10 @@ export class ChatManager implements Disposable {
     const text = this.chatInput.value.trim();
     if (!text) return;
 
-    log.info(` TURN START [user] | Text: "${text}"`);
+    // Mark that we rendered a user text message locally (to skip server echo)
+    this.pendingUserTextMessage = true;
+    
+    log.info(`📤 TURN START [user] | Text: "${text}"`);
     
     this.chatInput.value = '';
     this.avatar.setChatState('Hello');
@@ -559,10 +705,22 @@ export class ChatManager implements Disposable {
     this.audioOutput.stop();
     this.blendshapeBuffer.clear();
     
+    // Clear pending transcript items - they weren't spoken
+    this.transcriptQueue = [];
+    
+    // Clear early transcript buffer - prevents stale deltas from being processed
+    this.earlyTranscriptBuffer = [];
+    
+    // Truncate transcript to only show words that were actually spoken before interrupt
+    if (this.interruptCutoffMs !== null) {
+      this.truncateTranscriptAtOffset(this.interruptCutoffMs);
+    }
+    
     this.transcriptManager.finalizeAssistantTurn();
     this.subtitleController.clear();
     
     this.currentTurnId = null;
+    this.audioStartReceived = false;
     this.avatar.disableLiveBlendshapes();
     this.avatar.setChatState('Hello');
   }
@@ -594,6 +752,13 @@ export class ChatManager implements Disposable {
    */
   private processTranscriptQueue(): void {
     if (this.transcriptQueue.length === 0) return;
+    
+    // If interrupted, don't process any more words beyond the cutoff
+    if (this.wasInterrupted && this.interruptCutoffMs !== null) {
+      // Clear queue items beyond cutoff - they won't be spoken
+      this.transcriptQueue = this.transcriptQueue.filter(item => item.startOffset < this.interruptCutoffMs!);
+      if (this.transcriptQueue.length === 0) return;
+    }
 
     const playbackState = this.syncPlayback.getState();
     
@@ -635,6 +800,7 @@ export class ChatManager implements Disposable {
 
         if (item.role === 'assistant') {
           this.transcriptManager.appendToAssistantTurn(item.text);
+          this.displayedWords.push({ text: item.text, offset: item.startOffset });
           this.wordsSpokenCount++;
         } else {
           this.transcriptManager.streamText(item.text, item.role, item.itemId, item.previousItemId);

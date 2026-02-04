@@ -243,11 +243,22 @@ export class TranscriptManager implements Disposable {
 
   /**
    * Add a complete message (non-streaming)
+   * For user messages during an active assistant turn, inserts BEFORE the assistant bubble
+   * to maintain correct visual order (user spoke before assistant responded)
+  /**
+   * Add a complete message (non-streaming)
+   * 
+   * @param text - Message text
+   * @param sender - 'user' or 'assistant'
+   * @param insertBeforeAssistant - If true and there's an active assistant turn,
+   *        insert BEFORE the assistant bubble (used for voice transcripts that
+   *        chronologically occurred before the assistant started responding).
+   *        For typed messages, this should be false since user typed while
+   *        watching the response.
    */
-  addMessage(text: string, sender: 'user' | 'assistant'): void {
-    if (sender === 'user' && this.currentAssistantTurnElement) {
-      this.finalizeAssistantTurn();
-    }
+  addMessage(text: string, sender: 'user' | 'assistant', insertBeforeAssistant = false): void {
+    // Only insert before if explicitly requested AND there's an active assistant turn
+    const shouldInsertBefore = insertBeforeAssistant && sender === 'user' && this.currentAssistantTurnElement;
 
     const message: ChatMessage = {
       id: Date.now().toString(),
@@ -257,7 +268,14 @@ export class TranscriptManager implements Disposable {
     };
 
     this.messages.push(message);
-    this.renderMessage(message);
+    
+    if (shouldInsertBefore) {
+      // Insert user message before the current assistant turn element
+      this.renderMessageBefore(message, this.currentAssistantTurnElement!);
+    } else {
+      this.renderMessage(message);
+    }
+    
     this.scrollToBottom();
     this.options.onMessage?.({ role: sender, text });
   }
@@ -304,9 +322,21 @@ export class TranscriptManager implements Disposable {
 
   /**
    * Clear all state
+   * 
+   * Note: If there's an active assistant turn, it will be finalized first
+   * to prevent orphaned bubbles in the DOM when a new turn starts.
    */
   clear(): void {
     this.debugLogClear();
+    
+    // Finalize any active assistant turn to prevent orphaned bubbles
+    // This handles the race condition where a new audio_start arrives
+    // before the previous turn's stopAllPlayback() completes
+    if (this.currentAssistantTurnElement) {
+      log.debug('[TranscriptManager] clear() - finalizing orphaned assistant turn');
+      this.finalizeAssistantTurn();
+    }
+    
     this.streamingByItem.clear();
     this.latestItemForRole = {};
     this.bufferedDeltas.clear();
@@ -318,7 +348,8 @@ export class TranscriptManager implements Disposable {
       clearInterval(this.assistantAppendInterval);
       this.assistantAppendInterval = null;
     }
-    this.currentAssistantTurnElement = null;
+    // currentAssistantTurnElement already set to null by finalizeAssistantTurn
+    // but reset text just in case
     this.currentAssistantTurnText = '';
   }
 
@@ -452,6 +483,22 @@ export class TranscriptManager implements Disposable {
   }
 
   private renderMessage(message: ChatMessage): void {
+    const messageEl = this.createMessageElement(message);
+    this.chatMessages.appendChild(messageEl);
+  }
+
+  /**
+   * Insert a message BEFORE a specific element (used for user messages during assistant turn)
+   */
+  private renderMessageBefore(message: ChatMessage, beforeElement: HTMLElement): void {
+    const messageEl = this.createMessageElement(message);
+    this.chatMessages.insertBefore(messageEl, beforeElement);
+  }
+
+  /**
+   * Create a message DOM element
+   */
+  private createMessageElement(message: ChatMessage): HTMLElement {
     const messageEl = document.createElement('div');
     messageEl.className = `message ${message.sender}`;
     
@@ -464,7 +511,7 @@ export class TranscriptManager implements Disposable {
 
     messageEl.appendChild(bubbleEl);
     messageEl.appendChild(footerEl);
-    this.chatMessages.appendChild(messageEl);
+    return messageEl;
   }
 
   /**
