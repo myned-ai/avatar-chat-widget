@@ -79,6 +79,14 @@ export class VoiceInputController implements Disposable {
    * Start voice recording
    */
   async start(): Promise<void> {
+    // Check if microphone is available before trying to start
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const message = 'Voice input requires a secure connection (HTTPS). Please use text input instead.';
+      log.warn(message);
+      alert(message);
+      return;
+    }
+    
     try {
       log.info('Starting recording (PCM16 24kHz)');
 
@@ -103,7 +111,12 @@ export class VoiceInputController implements Disposable {
       log.error('Failed to start recording:', error);
       errorBoundary.handleError(error as Error, 'audio-input');
       this.options.onError?.(error as Error);
-      alert('Microphone access denied. Please enable microphone permissions.');
+      
+      // Show user-friendly message for permission denied
+      const errorMsg = (error as Error).message || '';
+      if (errorMsg.includes('Permission denied') || errorMsg.includes('NotAllowedError')) {
+        alert('Microphone access was denied. Please allow microphone access in your browser settings to use voice input.');
+      }
     }
   }
 

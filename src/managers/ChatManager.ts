@@ -195,7 +195,7 @@ export class ChatManager implements Disposable {
       await this.protocolClient.connect();
       log.info('WebSocket connected');
       this.avatar.setChatState('Idle');
-      await this.audioInput.requestPermission();
+      // Don't request mic permission eagerly - wait for user to click mic button
     } catch (error) {
       errorBoundary.handleError(error as Error, 'chat-manager');
       log.error('Connection failed');
@@ -313,6 +313,11 @@ export class ChatManager implements Disposable {
       this.useSyncPlayback = false;
       this.subtitleController.showRemaining();
       this.transcriptManager.finalizeAssistantTurn();
+      
+      // Clear subtitles after a brief delay so user can read the final text
+      setTimeout(() => {
+        this.subtitleController.clear();
+      }, 1500);
     });
   }
 

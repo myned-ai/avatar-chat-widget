@@ -31,6 +31,12 @@ export class AudioInput implements Disposable {
 
   async requestPermission(): Promise<boolean> {
     try {
+      // Check if mediaDevices API is available (requires HTTPS)
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        log.error('MediaDevices API not available. Microphone requires HTTPS.');
+        throw new Error('Microphone requires a secure connection (HTTPS)');
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: CONFIG.audio.input.sampleRate,
@@ -86,6 +92,11 @@ export class AudioInput implements Disposable {
    */
   private async startPCM16Recording(onData: (data: ArrayBuffer) => void): Promise<void> {
     try {
+      // Check if mediaDevices API is available (requires HTTPS)
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Microphone requires a secure connection (HTTPS)');
+      }
+      
       // Get microphone stream FIRST - this triggers user permission
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
