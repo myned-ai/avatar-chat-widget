@@ -1006,6 +1006,16 @@ export const WIDGET_STYLES = `
   object-fit: cover;
 }
 
+.avatar-fallback-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
+  color: white;
+}
+
 .bubble-avatar-preview .status-dot {
   position: absolute;
   bottom: 0;
@@ -1223,14 +1233,14 @@ export const WIDGET_STYLES = `
     bottom: 110px; /* Similar position to subtitles, above input */
     width: 95%;
     max-width: none;
-    gap: 8px;
-    padding: 8px;
+    gap: 6px;
+    padding: 4px;
   }
   
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions .suggestion-chip {
-    padding: 12px 18px;
-    font-size: 14px;
-    border-radius: 20px;
+    padding: 8px 12px;
+    font-size: 13px;
+    border-radius: 16px;
   }
   
   /* Mist overlay on mobile - covers lower portion without reaching avatar's face */

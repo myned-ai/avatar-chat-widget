@@ -95,7 +95,6 @@ export interface AvatarChatInstance {
  */
 export const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   position: 'bottom-right',
-  theme: 'light',
   startCollapsed: true,
   width: 380,
   height: 550,
