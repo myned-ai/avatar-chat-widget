@@ -22,6 +22,13 @@ export class SocketService extends EventEmitter implements Disposable {
   private isIntentionallyClosed = false;
   private authService: AuthService;
   private url: string;
+  
+  // Throttle repetitive warnings to avoid log spam when disconnected
+  private lastDisconnectedWarningTime = 0;
+  private lastQueueFullWarningTime = 0;
+  private disconnectedWarningCount = 0;
+  private queueFullWarningCount = 0;
+  private readonly WARNING_THROTTLE_MS = 5000; // Log at most once per 5 seconds
 
   constructor(url?: string) {
     super();
@@ -102,6 +109,11 @@ export class SocketService extends EventEmitter implements Disposable {
     log.info('WebSocket connected');
     this.setConnectionState('connected');
     this.reconnectAttempts = 0;
+    
+    // Reset warning throttle counters
+    this.disconnectedWarningCount = 0;
+    this.queueFullWarningCount = 0;
+    
     this.startHeartbeat();
     this.flushMessageQueue();
     this.emit('connected');
@@ -256,7 +268,21 @@ export class SocketService extends EventEmitter implements Disposable {
 
   send(message: OutgoingMessage): void {
     if (!this.isConnected()) {
-      log.warn(`Socket not connected (state: ${this.ws?.readyState}), queueing message type: ${message.type}`);
+      // Skip audio messages when disconnected - they're time-sensitive and useless when stale
+      if (message.type === 'audio') {
+        return; // Silently drop audio - no point queueing time-sensitive data
+      }
+      
+      // Throttle "not connected" warning to avoid log spam
+      const now = Date.now();
+      this.disconnectedWarningCount++;
+      if (now - this.lastDisconnectedWarningTime >= this.WARNING_THROTTLE_MS) {
+        const skipped = this.disconnectedWarningCount > 1 ? ` (${this.disconnectedWarningCount} messages since last warning)` : '';
+        log.warn(`Socket not connected (state: ${this.connectionState}), queueing message type: ${message.type}${skipped}`);
+        this.lastDisconnectedWarningTime = now;
+        this.disconnectedWarningCount = 0;
+      }
+      
       this.queueMessage(message);
       return;
     }
@@ -284,7 +310,15 @@ export class SocketService extends EventEmitter implements Disposable {
 
   private queueMessage(message: OutgoingMessage): void {
     if (this.messageQueue.length >= this.maxQueueSize) {
-      log.warn('Message queue full, dropping oldest message');
+      // Throttle "queue full" warning to avoid log spam
+      const now = Date.now();
+      this.queueFullWarningCount++;
+      if (now - this.lastQueueFullWarningTime >= this.WARNING_THROTTLE_MS) {
+        const dropped = this.queueFullWarningCount;
+        log.warn(`Message queue full, dropped ${dropped} message(s)`);
+        this.lastQueueFullWarningTime = now;
+        this.queueFullWarningCount = 0;
+      }
       this.messageQueue.shift();
     }
     this.messageQueue.push(message);
