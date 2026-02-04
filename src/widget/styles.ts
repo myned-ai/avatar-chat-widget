@@ -85,8 +85,10 @@ export const WIDGET_STYLES = `
 @media (max-width: 480px) {
   .widget-root {
     width: 100vw;
-    height: 100vh;
+    height: 100vh; /* Fallback for older browsers */
+    height: 100dvh; /* Dynamic viewport height - accounts for mobile browser UI */
     max-height: 100vh;
+    max-height: 100dvh;
     border-radius: 0;
     /* Let the mobile media query at the bottom handle the rest */
     padding-bottom: 90px; /* Ensure input layer space is preserved */
@@ -1006,6 +1008,16 @@ export const WIDGET_STYLES = `
   object-fit: cover;
 }
 
+.avatar-fallback-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
+  color: white;
+}
+
 .bubble-avatar-preview .status-dot {
   position: absolute;
   bottom: 0;
@@ -1125,7 +1137,8 @@ export const WIDGET_STYLES = `
   
   /* Avatar-focus mode on mobile: avatar takes most of the space */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] {
-    --avatar-height: calc(100vh - 56px - 90px) !important; /* Full height minus header and input */
+    --avatar-height: calc(100vh - 56px - 90px) !important; /* Fallback */
+    --avatar-height: calc(100dvh - 56px - 90px) !important; /* Full height minus header and input */
     background: transparent !important; /* Let avatar stage show through */
   }
   
@@ -1170,11 +1183,13 @@ export const WIDGET_STYLES = `
   
   /* Text-focus mode on mobile: chat takes most of the space, avatar in corner */
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] {
-    --chat-height: calc(100vh - 70px - 90px) !important; /* Full height minus header and input */
+    --chat-height: calc(100vh - 70px - 90px) !important; /* Fallback */
+    --chat-height: calc(100dvh - 70px - 90px) !important; /* Full height minus header and input */
   }
   
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] .chat-section {
-    height: calc(100vh - 70px - 90px) !important;
+    height: calc(100vh - 70px - 90px) !important; /* Fallback */
+    height: calc(100dvh - 70px - 90px) !important;
     flex: 1;
   }
   
@@ -1223,14 +1238,14 @@ export const WIDGET_STYLES = `
     bottom: 110px; /* Similar position to subtitles, above input */
     width: 95%;
     max-width: none;
-    gap: 8px;
-    padding: 8px;
+    gap: 6px;
+    padding: 4px;
   }
   
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions .suggestion-chip {
-    padding: 12px 18px;
-    font-size: 14px;
-    border-radius: 20px;
+    padding: 8px 12px;
+    font-size: 13px;
+    border-radius: 16px;
   }
   
   /* Mist overlay on mobile - covers lower portion without reaching avatar's face */

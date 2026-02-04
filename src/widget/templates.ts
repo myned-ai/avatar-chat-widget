@@ -133,7 +133,13 @@ export const BUBBLE_TEMPLATE = `
   </div>
   <div class="chat-bubble" id="chatBubble" role="button" aria-label="Open chat" tabindex="0">
     <div class="bubble-avatar-preview">
-      <img src="./asset/avatar.gif" class="avatar-face-img" alt="Nyx Avatar" />
+      <img src="./asset/avatar.gif" class="avatar-face-img" alt="Nyx Avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+      <div class="avatar-fallback-icon" style="display:none;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </div>
       <div class="status-dot"></div>
     </div>
   </div>

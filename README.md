@@ -23,8 +23,7 @@ Add directly to any HTML page or website builder:
   AvatarChat.init({
     container: '#avatar-chat',
     serverUrl: 'wss://your-backend-server.com/ws',
-    position: 'bottom-right',
-    theme: 'light'
+    position: 'bottom-right'
   });
 </script>
 ```
@@ -63,7 +62,6 @@ chat.destroy();  // Cleanup
 | `container` | `string \| HTMLElement` | **required** | CSS selector or DOM element |
 | `serverUrl` | `string` | **required** | WebSocket server URL (ws:// or wss://) |
 | `position` | `string` | `'bottom-right'` | `bottom-right`, `bottom-left`, `top-right`, `top-left`, `inline` |
-| `theme` | `string` | `'light'` | `light`, `dark`, `auto` (follows system preference) |
 | `startCollapsed` | `boolean` | `true` | Start minimized as bubble |
 | `width` | `number` | `380` | Widget width (200-2000px) |
 | `height` | `number` | `550` | Widget height (300-2000px) |

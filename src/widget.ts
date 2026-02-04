@@ -484,9 +484,9 @@ class AvatarChatElement extends HTMLElement {
       quickReplies?.addEventListener('click', handleChipClick);
       avatarSuggestions?.addEventListener('click', handleChipClick);
 
-      // 2. Hide on Voice Start
+      // 2. Hide on Voice Start (mic click)
       micBtn?.addEventListener('click', () => {
-        this.markHasMessages(); // Mark has messages immediately
+        this.markHasMessages();
         hideSuggestions();
       });
 
