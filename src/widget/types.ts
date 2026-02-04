@@ -15,9 +15,6 @@ export interface AvatarChatConfig {
   /** Widget position when using floating mode */
   position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'inline';
 
-  /** UI theme */
-  theme?: 'light' | 'dark' | 'auto';
-
   /** Start in collapsed state (bubble only) */
   startCollapsed?: boolean;
 

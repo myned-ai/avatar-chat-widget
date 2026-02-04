@@ -100,14 +100,6 @@ export const WIDGET_STYLES = `
   transition: transform 0.3s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease;
 }
 
-.widget-root.theme-dark {
-  --bg-color: #0f111a;
-  --text-color: #ffffff;
-  --input-bg: #1e2130;
-  --border-color: #2a2e42;
-  color: white;
-}
-
 /* ==========================================================================
    Header Layer (Fixed Height: 56px - NEVER changes)
    ========================================================================== */
@@ -145,11 +137,6 @@ export const WIDGET_STYLES = `
   overflow: visible; /* Allow avatar to overflow */
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-}
-
-/* Dark theme text-focus header */
-.theme-dark[data-drawer-state="text-focus"] .header-layer {
-  background: #0f111a;
 }
 
 /* Allow avatar circle to break out of widget in text-focus */
@@ -208,10 +195,6 @@ export const WIDGET_STYLES = `
   font-weight: 700;
   color: var(--text-color);
   letter-spacing: -0.01em;
-}
-
-.theme-dark .header-info h3 {
-  color: white;
 }
 
 .header-buttons {
@@ -285,14 +268,6 @@ export const WIDGET_STYLES = `
   background: rgba(0, 0, 0, 0.08);
 }
 
-.theme-dark .control-btn {
-  color: white;
-}
-
-.theme-dark .control-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
 /* ==========================================================================
    View Mode Toggle Button
    ========================================================================== */
@@ -353,11 +328,6 @@ export const WIDGET_STYLES = `
   transition: none;
 }
 
-.theme-dark [data-drawer-state="text-focus"] .avatar-section {
-  background: #1e2130;
-  border-color: #1e2130;
-}
-
 /* Clip avatar content to circle but allow status dot to overflow */
 [data-drawer-state="text-focus"] .avatar-stage {
   border-radius: 50%;
@@ -378,10 +348,6 @@ export const WIDGET_STYLES = `
   background: white;
 }
 
-.theme-dark [data-drawer-state="text-focus"] .avatar-stage {
-  background: #1e2130;
-}
-
 /* Keep canvas at full resolution for quality, just reposition to show face in circle */
 [data-drawer-state="text-focus"] .avatar-render-container {
   width: 800px;
@@ -399,10 +365,6 @@ export const WIDGET_STYLES = `
   bottom: 0;
   background: radial-gradient(circle at center 40%, #f0f4ff 0%, #ffffff 80%);
   overflow: hidden;
-}
-
-.theme-dark .avatar-stage {
-  background: radial-gradient(circle at center 30%, #1a1d2e 0%, #0f111a 100%);
 }
 
 /* Avatar Render Container (Injected by LazyAvatar) */
@@ -451,16 +413,6 @@ export const WIDGET_STYLES = `
   
   z-index: 10; /* ON TOP of avatar, BEHIND text/input */
   pointer-events: none; /* Let clicks pass through */
-}
-
-/* Dark theme mist - fades to dark background */
-.theme-dark .avatar-mist-overlay {
-  background: linear-gradient(to bottom, 
-    rgba(15, 17, 26, 0) 0%, 
-    rgba(15, 17, 26, 0.7) 45%,
-    rgba(15, 17, 26, 0.9) 70%,
-    #0f111a 100%
-  );
 }
 
 /* Only show mist in avatar-focus mode */
@@ -534,13 +486,6 @@ export const WIDGET_STYLES = `
   animation: subtitleFadeIn 0.3s ease forwards;
 }
 
-/* Dark theme - light text with dark glow */
-.theme-dark .avatar-subtitles {
-  color: #F9FAFB;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5),
-               0 0 8px rgba(0, 0, 0, 0.3);
-}
-
 /* Only show subtitles in avatar-focus mode */
 [data-drawer-state="avatar-focus"] .avatar-subtitles {
   display: block;
@@ -567,18 +512,10 @@ export const WIDGET_STYLES = `
   color: #4B4ACF;
 }
 
-.theme-dark .avatar-subtitles.user-speaking {
-  color: #a5a4f3;
-}
-
 /* Karaoke-style highlight for current word being spoken */
 .avatar-subtitles .subtitle-current {
   color: #4B4ACF;
   font-weight: 600;
-}
-
-.theme-dark .avatar-subtitles .subtitle-current {
-  color: #a5a4f3;
 }
 
 /* ==========================================================================
@@ -631,17 +568,6 @@ export const WIDGET_STYLES = `
   border-color: var(--primary-color);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(75, 74, 207, 0.25);
-}
-
-.theme-dark .avatar-suggestions .suggestion-chip {
-  background: rgba(30, 33, 48, 0.9);
-  border-color: #3f445e;
-  color: #e0e0e0;
-}
-
-.theme-dark .avatar-suggestions .suggestion-chip:hover {
-  background: var(--primary-color);
-  color: white;
 }
 
 /* ==========================================================================
@@ -776,16 +702,6 @@ export const WIDGET_STYLES = `
   border-color: var(--primary-color);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(75, 74, 207, 0.25);
-}
-
-.theme-dark .suggestion-chip {
-  background: #2a2e42;
-  border-color: #3f445e;
-  color: #e0e0e0;
-}
-.theme-dark .suggestion-chip:hover {
-  background: var(--primary-color);
-  color: white;
 }
 
 /* Typing Indicator - absolutely positioned at bottom, floats on top of messages */
@@ -925,13 +841,6 @@ export const WIDGET_STYLES = `
 .message-time {
   font-size: 11px;
   color: #9ca3af;
-}
-
-.theme-dark .message.assistant .message-bubble {
-  background: #1e2130; /* Dark card */
-  color: #e0e0e0;
-  border: 1px solid #2a2e42; /* Subtle dark border */
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2); /* Shadow for elevation */
 }
 
 /* Chat Input Area */
@@ -1254,26 +1163,9 @@ export const WIDGET_STYLES = `
     background-color: #ffffff !important;
   }
   
-  /* Dark theme header in avatar-focus - dark background */
-  :host(:not(.collapsed)) .theme-dark[data-drawer-state="avatar-focus"] .header-layer,
-  .theme-dark[data-drawer-state="avatar-focus"] .header-layer,
-  .widget-root.theme-dark[data-drawer-state="avatar-focus"] .header-layer,
-  [data-drawer-state="avatar-focus"].theme-dark .header-layer {
-    background: #0f111a !important;
-    background-color: #0f111a !important;
-  }
-  
   /* Use solid white background for avatar stage on mobile - matches input/chat */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
     background: #ffffff !important; /* Pure white for light theme */
-  }
-  
-  /* Dark theme avatar stage on mobile - multiple selectors for specificity */
-  :host(:not(.collapsed)) .theme-dark[data-drawer-state="avatar-focus"] .avatar-stage,
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"].theme-dark .avatar-stage,
-  .theme-dark[data-drawer-state="avatar-focus"] .avatar-stage,
-  .widget-root.theme-dark[data-drawer-state="avatar-focus"] .avatar-stage {
-    background: #0f111a !important; /* Dark background for dark theme */
   }
   
   /* Text-focus mode on mobile: chat takes most of the space, avatar in corner */
