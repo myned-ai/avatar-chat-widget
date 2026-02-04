@@ -91,7 +91,7 @@ export class VoiceInputController implements Disposable {
       await this.audioInput.startRecording((audioData) => {
         chunkCount++;
         if (chunkCount <= 5 || chunkCount % 50 === 0) {
-          log.info(`Audio chunk ${chunkCount}: ${audioData.byteLength} bytes`);
+          log.debug(`Audio chunk ${chunkCount}: ${audioData.byteLength} bytes`);
         }
         this.protocolClient.sendAudioData(audioData);
       }, 'pcm16');
