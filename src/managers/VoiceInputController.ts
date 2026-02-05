@@ -89,12 +89,8 @@ export class VoiceInputController implements Disposable {
     
     try {
       log.info('Starting recording (PCM16 24kHz)');
-
-      // Signal server that audio stream is starting
-      this.protocolClient.sendAudioStreamStart();
-      log.info('Sent audio_stream_start to server');
       
-      // Start recording with PCM16 mode
+      // Start recording with PCM16 mode - this triggers permission prompt
       let chunkCount = 0;
       await this.audioInput.startRecording((audioData) => {
         chunkCount++;
@@ -104,7 +100,9 @@ export class VoiceInputController implements Disposable {
         this.protocolClient.sendAudioData(audioData);
       }, 'pcm16');
       
-      log.info('Recording started successfully');
+      // Only signal server AFTER recording successfully started (permission granted)
+      this.protocolClient.sendAudioStreamStart();
+      log.info('Recording started successfully, sent audio_stream_start to server');
       this.setRecordingState(true);
       
     } catch (error) {
@@ -112,10 +110,18 @@ export class VoiceInputController implements Disposable {
       errorBoundary.handleError(error as Error, 'audio-input');
       this.options.onError?.(error as Error);
       
-      // Show user-friendly message for permission denied
+      // Show user-friendly message based on error type
+      const errorName = (error as Error).name || '';
       const errorMsg = (error as Error).message || '';
-      if (errorMsg.includes('Permission denied') || errorMsg.includes('NotAllowedError')) {
+      const errorStr = `${errorName} ${errorMsg}`.toLowerCase();
+      
+      if (errorStr.includes('policy') || errorStr.includes('not allowed in this document')) {
+        alert('Microphone is blocked by this website\'s security settings. The site owner needs to enable microphone access.');
+      } else if (errorName === 'NotAllowedError' || errorStr.includes('permission denied') || errorStr.includes('denied')) {
         alert('Microphone access was denied. Please allow microphone access in your browser settings to use voice input.');
+      } else {
+        // Generic fallback - always show something
+        alert('Could not access microphone. Please check your browser settings and try again.');
       }
     }
   }
