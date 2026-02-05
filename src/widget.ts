@@ -146,9 +146,12 @@ class AvatarChatElement extends HTMLElement {
 
     log.info('Mounting widget');
 
+    // Generate color overrides from config
+    const colorOverrides = this.generateColorOverrides();
+
     // Inject styles
     const styleEl = document.createElement('style');
-    styleEl.textContent = WIDGET_STYLES + (this.config.customStyles || '');
+    styleEl.textContent = WIDGET_STYLES + colorOverrides + (this.config.customStyles || '');
     this.shadow.appendChild(styleEl);
 
     // Set position class
@@ -560,6 +563,50 @@ class AvatarChatElement extends HTMLElement {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  /**
+   * Generate CSS overrides for primaryColor and secondaryColor config options
+   */
+  private generateColorOverrides(): string {
+    const overrides: string[] = [];
+    
+    if (this.config.primaryColor) {
+      const primary = this.config.primaryColor;
+      // Generate a darker shade for gradient (darken by ~20%)
+      const darkerShade = this.darkenColor(primary, 0.2);
+      overrides.push(`--primary-color: ${primary};`);
+      overrides.push(`--primary-gradient: linear-gradient(135deg, ${primary} 0%, ${darkerShade} 100%);`);
+    }
+    
+    if (this.config.secondaryColor) {
+      overrides.push(`--secondary-color: ${this.config.secondaryColor};`);
+    }
+    
+    if (overrides.length === 0) return '';
+    
+    return `:host { ${overrides.join(' ')} }`;
+  }
+
+  /**
+   * Darken a hex color by a percentage
+   */
+  private darkenColor(hex: string, percent: number): string {
+    // Remove # if present
+    hex = hex.replace(/^#/, '');
+    
+    // Parse RGB
+    let r = parseInt(hex.substring(0, 2), 16);
+    let g = parseInt(hex.substring(2, 4), 16);
+    let b = parseInt(hex.substring(4, 6), 16);
+    
+    // Darken
+    r = Math.max(0, Math.floor(r * (1 - percent)));
+    g = Math.max(0, Math.floor(g * (1 - percent)));
+    b = Math.max(0, Math.floor(b * (1 - percent)));
+    
+    // Convert back to hex
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   }
 
   /**

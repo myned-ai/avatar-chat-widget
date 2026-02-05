@@ -30,6 +30,7 @@ export const WIDGET_STYLES = `
   box-sizing: border-box;
   --primary-color: #4B4ACF;
   --primary-gradient: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
+  --secondary-color: #1F2937;
   --bg-color: #ffffff;
   --text-color: #1F2937;
   --input-bg: #f5f5f7;
@@ -195,7 +196,7 @@ export const WIDGET_STYLES = `
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: var(--text-color);
+  color: var(--secondary-color);
   letter-spacing: -0.01em;
 }
 
@@ -248,7 +249,7 @@ export const WIDGET_STYLES = `
 .control-btn {
   background: transparent;
   border: none;
-  color: var(--text-color);
+  color: var(--secondary-color);
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -1014,7 +1015,7 @@ export const WIDGET_STYLES = `
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
+  background: var(--primary-gradient);
   color: white;
 }
 

@@ -45,6 +45,12 @@ export interface AvatarChatConfig {
   /** Custom CSS to inject (optional) */
   customStyles?: string;
 
+  /** Primary brand color for user bubbles, suggestions, widget accents (default: #4B4ACF) */
+  primaryColor?: string;
+
+  /** Secondary color for header text, toolbar icons, widget icon (default: #1F2937) */
+  secondaryColor?: string;
+
   /** Quick reply suggestions shown below chat (default: built-in suggestions) */
   suggestions?: string[];
 
