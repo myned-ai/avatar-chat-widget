@@ -106,6 +106,7 @@ class AvatarChatElement extends HTMLElement {
   private _isMounted = false;
   private _isConnected = false;
   private _isCollapsed = false;
+  private visualViewportHandler: (() => void) | null = null;
 
   constructor() {
     super();
@@ -198,6 +199,9 @@ class AvatarChatElement extends HTMLElement {
 
     // Setup UI event listeners
     this.setupUIEvents();
+    
+    // Setup mobile keyboard handling
+    this.setupMobileKeyboardHandling();
 
     // Hide voice button if disabled
     if (!this.config.enableVoice) {
@@ -504,6 +508,49 @@ class AvatarChatElement extends HTMLElement {
         }
       });
     }
+  }
+
+  /**
+   * Handle mobile keyboard appearance using VisualViewport API
+   * Resizes the avatar to fit when keyboard opens
+   */
+  private setupMobileKeyboardHandling(): void {
+    // Only needed if visualViewport API is available
+    if (!window.visualViewport) {
+      return;
+    }
+
+    const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
+    
+    if (!widgetRoot) {
+      return;
+    }
+    
+    let initialViewportHeight = window.visualViewport.height;
+    
+    const handleViewportChange = () => {
+      const viewport = window.visualViewport!;
+      const currentHeight = viewport.height;
+      
+      // Check if keyboard opened (significant height reduction)
+      const keyboardHeight = initialViewportHeight - currentHeight;
+      
+      if (keyboardHeight > 150) {
+        // Keyboard is open - add class to trigger CSS resize
+        widgetRoot.classList.add('keyboard-visible');
+      } else {
+        // Keyboard is closed - remove class
+        widgetRoot.classList.remove('keyboard-visible');
+        // Update baseline for next check
+        initialViewportHeight = currentHeight;
+      }
+    };
+    
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    window.visualViewport.addEventListener('scroll', handleViewportChange);
+    
+    // Store handler for cleanup
+    this.visualViewportHandler = handleViewportChange;
   }
 
   /**

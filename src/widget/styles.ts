@@ -1284,4 +1284,45 @@ export const WIDGET_STYLES = `
   white-space: nowrap;
   border-width: 0;
 }
+
+/* ==========================================================================
+   Mobile Keyboard Visible State
+   Resize avatar when virtual keyboard appears on mobile
+   ========================================================================== */
+@media (max-width: 480px) {
+  /* When keyboard is visible, shrink the avatar section */
+  .widget-root.keyboard-visible {
+    --avatar-height: 180px;
+  }
+  
+  /* Scale down the avatar render and push it down */
+  .widget-root.keyboard-visible .avatar-render-container {
+    transform: translate(-50%, -35%) scale(0.65) !important;
+    transition: transform 0.3s ease;
+  }
+  
+  /* Show subtitles but position them properly */
+  .widget-root.keyboard-visible .avatar-subtitles {
+    display: block !important;
+    bottom: 100px !important;
+    font-size: 14px;
+  }
+  
+  /* Hide mist to save space */
+  .widget-root.keyboard-visible .avatar-mist-overlay {
+    display: none !important;
+  }
+  
+  /* Move suggestions closer to input */
+  .widget-root.keyboard-visible .avatar-suggestions {
+    bottom: 95px !important;
+  }
+  
+  /* In text-focus mode with keyboard, ensure chat doesn't overflow */
+  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .chat-section {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+}
 `;
