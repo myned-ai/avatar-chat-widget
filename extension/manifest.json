@@ -1,0 +1,28 @@
+{
+    "manifest_version": 3,
+    "name": "Avatar Chat Widget",
+    "version": "1.0.0",
+    "minimum_chrome_version": "116",
+    "description": "Real-time voice/text chat widget with 3D avatar animation",
+    "permissions": [
+        "sidePanel"
+    ],
+    "host_permissions": [
+        "<all_urls>"
+    ],
+    "side_panel": {
+        "default_path": "sidebar.html"
+    },
+    "action": {
+        "default_title": "Open Avatar Chat"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "cross_origin_embedder_policy": {
+        "value": "require-corp"
+    },
+    "cross_origin_opener_policy": {
+        "value": "same-origin"
+    }
+}

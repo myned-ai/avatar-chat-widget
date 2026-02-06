@@ -46,6 +46,7 @@
         "build": "tsc && vite build",
         "build:lib": "tsc && vite build --config vite.config.lib.ts",
         "build:all": "npm run build && npm run build:lib",
+        "build:extension": "npm run build:lib && robocopy dist extension\\dist /E /IS /IT /NB /NJH /NJS || if %ERRORLEVEL% LEQ 1 exit 0",
         "preview": "vite preview",
         "test:server": "python tools/test_server.py",
         "lint": "eslint src --ext .ts,.tsx",
