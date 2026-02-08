@@ -69,6 +69,8 @@ export class ChatManager implements Disposable {
   private turnStartTime: number = 0;
   private userId: string;
   private audioStartReceived: boolean = false;
+  private useSyncPlayback = true;
+  private playbackEnded = false;
   private syncFramesBeforeStart: number = 0;
   private wasInterrupted: boolean = false;
   private interruptCutoffMs: number | null = null; // Cutoff offset when interrupted
@@ -91,8 +93,7 @@ export class ChatManager implements Disposable {
   // Animation state
   private animationFrameId: number | null = null;
   private autoScrollObserver: MutationObserver | null = null;
-  private useSyncPlayback = false;
-
+  
   // Transcript Queue for synced display (words are queued with startOffset, displayed when audio reaches that time)
   private transcriptQueue: Array<{
     text: string;
@@ -172,7 +173,7 @@ export class ChatManager implements Disposable {
       audioInput: this.audioInput,
       protocolClient: this.protocolClient,
       micBtn: this.micBtn,
-      onRecordingStart: () => this.avatar.setChatState('Hello'),
+      onRecordingStart: () => this.avatar.setChatState('Idle'),
       onError: options.onError
     });
 
@@ -292,32 +293,8 @@ export class ChatManager implements Disposable {
     });
 
     this.syncPlayback.setPlaybackEndCallback(() => {
-      log.info('SyncPlayback ended - transitioning to Idle');
-      
-      // Only flush remaining transcript if NOT interrupted
-      // On interrupt, we want to show only what was actually spoken
-      if (!this.wasInterrupted) {
-        while (this.transcriptQueue.length > 0) {
-          const item = this.transcriptQueue.shift();
-          if (item?.role === 'assistant') {
-            this.transcriptManager.appendToAssistantTurn(item.text);
-          }
-        }
-      } else {
-        // Clear the queue without displaying
-        this.transcriptQueue = [];
-      }
-      
-      this.avatar.setChatState('Idle');
-      this.avatar.disableLiveBlendshapes();
-      this.useSyncPlayback = false;
-      this.subtitleController.showRemaining();
-      this.transcriptManager.finalizeAssistantTurn();
-      
-      // Clear subtitles after a brief delay so user can read the final text
-      setTimeout(() => {
-        this.subtitleController.clear();
-      }, 1500);
+      log.info('SyncPlayback ended - setting playbackEnded flag.');
+      this.playbackEnded = true;
     });
   }
 
@@ -371,11 +348,12 @@ export class ChatManager implements Disposable {
     });
 
     this.protocolClient.on('avatar_state', (event: { state: string }) => {
-      const stateMap: Record<string, 'Idle' | 'Hello' | 'Responding'> = {
+      log.info('Avatar state event:', event);
+      const stateMap: Record<string, 'Idle' | 'Responding'> = {
         'Idle': 'Idle',
-        'Listening': 'Hello',
-        'Processing': 'Hello',
-        'Thinking': 'Hello',
+        'Listening': 'Idle',
+        'Thinking': 'Responding',
+        'Processing': 'Responding',
         'Responding': 'Responding',
       };
       this.avatar.setChatState(stateMap[event.state] || 'Idle');
@@ -699,7 +677,7 @@ export class ChatManager implements Disposable {
     log.info(`📤 TURN START [user] | Text: "${text}"`);
     
     this.chatInput.value = '';
-    this.avatar.setChatState('Hello');
+    this.avatar.setChatState('Idle');
     this.transcriptManager.addMessage(text, 'user');
     this.protocolClient.sendText(text);
     this.setTyping(true);
@@ -723,11 +701,11 @@ export class ChatManager implements Disposable {
     
     this.transcriptManager.finalizeAssistantTurn();
     this.subtitleController.clear();
-    
+
     this.currentTurnId = null;
     this.audioStartReceived = false;
     this.avatar.disableLiveBlendshapes();
-    this.avatar.setChatState('Hello');
+    this.avatar.setChatState('Idle');
   }
 
   private startBlendshapeSync(): void {
@@ -742,12 +720,51 @@ export class ChatManager implements Disposable {
         if (result.status === 'SPEAKING' && this.avatar.getChatState() !== 'Responding') {
           this.avatar.setChatState('Responding');
         } else if (result.status === 'LISTENING' && result.endOfSpeech) {
-          this.avatar.setChatState('Hello');
+          this.avatar.setChatState('Idle');
         }
       }
+
+      // When playback ends and blendshapes are drained, do cleanup (but keep loop running)
+      if (this.playbackEnded && this.blendshapeBuffer.isEmpty()) {
+        log.info('Playback ended and buffer is empty. Cleaning up and setting state to Idle.');
+        
+        // Flush remaining transcript queue (only if not interrupted)
+        if (!this.wasInterrupted) {
+          while (this.transcriptQueue.length > 0) {
+            const item = this.transcriptQueue.shift();
+            if (item?.role === 'assistant') {
+              this.transcriptManager.appendToAssistantTurn(item.text);
+              this.subtitleController.markWordSpoken();
+            }
+          }
+        } else {
+          this.transcriptQueue = [];
+        }
+        
+        // Show any remaining subtitle text, finalize transcript, then clear subtitles
+        this.subtitleController.showRemaining();
+        this.transcriptManager.finalizeAssistantTurn();
+        
+        // Clear subtitles after a brief delay so user can read the final text
+        setTimeout(() => {
+          this.subtitleController.clear();
+        }, 1500);
+        
+        this.avatar.setChatState('Idle');
+        this.resetPlaybackState();
+      }
+
       this.animationFrameId = requestAnimationFrame(sync);
     };
     sync();
+  }
+
+  private resetPlaybackState(): void {
+    this.playbackEnded = false;
+    this.interruptCutoffMs = null;
+    this.currentTurnId = null;
+    this.audioStartReceived = false;
+    this.avatar.disableLiveBlendshapes();
   }
 
   /**

@@ -1,4 +1,3 @@
-
 import * as GaussianSplats3D from "@myned-ai/gsplat-flame-avatar-renderer"
 import { createNeutralWeights } from '../constants/arkit';
 import { logger } from '../utils/Logger';
@@ -17,7 +16,6 @@ const BLINK_PATTERNS = [
 // Blink intervals per state (min, max) in milliseconds
 const BLINK_INTERVALS: Record<ChatState, [number, number]> = {
   'Idle': [2000, 4000],      // Relaxed: 2-4 seconds
-  'Hello': [1800, 3500],     // Attentive: slightly more frequent
   'Responding': [1300, 3300], // Speaking: natural rate
 };
 

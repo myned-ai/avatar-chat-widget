@@ -541,11 +541,25 @@ class AvatarChatElement extends HTMLElement {
       if (keyboardHeight > 150) {
         // Keyboard is open - add class to trigger CSS resize
         widgetRoot.classList.add('keyboard-visible');
+        
+        // Force avatar container to recalculate position (fixes WebGL canvas offset)
+        const avatarSection = this.shadow.querySelector('.avatar-section') as HTMLElement;
+        if (avatarSection) {
+          // Trigger reflow by reading and writing a layout property
+          void avatarSection.offsetHeight;
+          avatarSection.style.transform = 'translateZ(0)';
+        }
       } else {
         // Keyboard is closed - remove class
         widgetRoot.classList.remove('keyboard-visible');
         // Update baseline for next check
         initialViewportHeight = currentHeight;
+        
+        // Reset transform
+        const avatarSection = this.shadow.querySelector('.avatar-section') as HTMLElement;
+        if (avatarSection) {
+          avatarSection.style.transform = '';
+        }
       }
     };
     

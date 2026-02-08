@@ -4,7 +4,7 @@ export interface Disposable {
   dispose(): void;
 }
 
-export type ChatState = 'Idle' | 'Hello' | 'Responding';
+export type ChatState = 'Idle' | 'Responding';
 
 export interface EventCallback<T = unknown> {
   (data: T): void;

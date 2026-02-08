@@ -138,13 +138,12 @@ export class SubtitleController implements Disposable {
     // If the next chunk would start with punctuation, move it to the end of the previous chunk
     while (this.nextChunk.length > 0 && this.isPunctuationOnly(this.nextChunk[0])) {
       const punct = this.nextChunk.shift()!;
-      // If there is a previous chunk, append punctuation to its last word and redisplay
-      if (this.options.onSubtitleUpdate && typeof this.options.onSubtitleUpdate === 'function' && this.currentChunk.length === 0) {
-        // Try to append to the last displayed chunk (not tracked here), so instead, emit a special event or rely on transcript for now
-        // For now, just ignore if no currentChunk, otherwise append
-        // In practice, this will only happen if a chunk just ended
-      } else if (this.currentChunk.length > 0) {
+      if (this.currentChunk.length > 0) {
+        // Append to last word in current chunk
         this.currentChunk[this.currentChunk.length - 1] += punct;
+      } else {
+        // No current chunk yet — keep punctuation as its own token so it's not lost
+        this.currentChunk.push(punct);
       }
     }
 

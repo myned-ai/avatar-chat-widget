@@ -78,6 +78,10 @@ export class BlendshapeBuffer implements Disposable {
     }
   }
 
+  public isEmpty(): boolean {
+    return this.buffer.isEmpty;
+  }
+
   /**
    * Get a frame following OpenAvatarChat pattern:
    * - ALWAYS returns a frame (never null)

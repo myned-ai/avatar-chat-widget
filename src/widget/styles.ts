@@ -1325,5 +1325,33 @@ export const WIDGET_STYLES = `
     min-height: 0 !important;
     height: auto !important;
   }
+  
+  /* Force the avatar orb to stay properly positioned when keyboard is visible */
+  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-section {
+    position: absolute !important;
+    top: 8px !important;
+    left: 10px !important;
+    /* Force GPU layer to ensure canvas follows */
+    will-change: transform;
+    transform: translateZ(0);
+  }
+  
+  /* Force avatar stage to clip properly */
+  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-stage {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+  
+  /* Ensure avatar canvas stays properly centered in the orb when keyboard is visible */
+  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-render-container {
+    position: absolute !important;
+    top: 58% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) scale(0.20) !important;
+    /* Force repaint */
+    will-change: transform;
+  }
 }
 `;
