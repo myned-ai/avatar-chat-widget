@@ -278,7 +278,7 @@ const AVATAR_STYLES = `
 }
 
 [data-drawer-state="avatar-focus"] .avatar-render-container {
-  top: 45%;
+  top: 52%;
 }
 
 /* Avatar Mist Overlay */
@@ -891,6 +891,7 @@ const MOBILE_STYLES = `
   }
   
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-render-container {
+    top: 48%;
     transform: translate(-50%, -50%) scale(0.85); /* Larger on mobile */
   }
 
@@ -910,17 +911,17 @@ const MOBILE_STYLES = `
   /* Resize avatar circle for mobile */
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-section {
     left: 12px; top: 12px; /* Better alignment */
-    width: 50px; height: 50px; /* Smaller distinct circle */
+    width: 80px; height: 80px; /* Bigger circle */
     border-width: 2px;
   }
   
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] .header-layer {
-    padding-left: 72px; /* 12px + 50px + 10px */
+    padding-left: 102px; /* 12px + 80px + 10px */
   }
 
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-render-container {
     top: 58% !important; /* Move up for better centering */
-    transform: translate(-50%, -50%) scale(0.16);
+    transform: translate(-50%, -50%) scale(0.25);
   }
 
   /* Restore header button sizes in text mode on mobile */
@@ -950,7 +951,7 @@ const MOBILE_STYLES = `
 
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-subtitles {
     display: block;
-    bottom: 100px;
+    bottom: 170px;
     max-width: 90%;
     width: auto;
     font-size: 15px;
@@ -975,7 +976,7 @@ const MOBILE_STYLES = `
 
   /* Move avatar to stay visible just above input when keyboard is open */
   .widget-root.keyboard-visible[data-drawer-state="avatar-focus"] .avatar-render-container {
-    transform: translate(-50%, -12%) scale(0.50) !important;
+    transform: translate(-50%, -5%) scale(0.45) !important;
     transition: transform 0.3s var(--ease-spring);
   }
   .widget-root.input-focused[data-drawer-state="avatar-focus"] .avatar-render-container { 
@@ -983,10 +984,10 @@ const MOBILE_STYLES = `
     transition: transform 0.3s var(--ease-spring);
   }
 
-  /* Text-focus mode: move avatar orb just above input when keyboard is visible */
+  /* Text-focus mode: keep avatar in header when keyboard is visible */
   .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-section {
-    top: auto !important;
-    bottom: calc(var(--input-height) + 25px) !important;
+    top: 12px !important;
+    bottom: auto !important;
     left: 12px !important;
     transform: none;
   }
@@ -1002,6 +1003,14 @@ const MOBILE_STYLES = `
     background: rgba(255, 255, 255, 0.9);
     backdrop-filter: blur(8px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    font-size: 13px;
+    padding: 10px 16px;
+  }
+
+  /* Match tooltip font size and increase padding for pills on mobile */
+  .suggestion-chip {
+    font-size: 13px;
+    padding: 10px 16px;
   }
 }
 `;
