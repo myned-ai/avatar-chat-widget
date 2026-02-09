@@ -1,45 +1,44 @@
 /**
  * Widget Styles
- * Push Drawer Layout (2026 Redesign)
- * 
- * Vertical flex layout:
- * - Header (fixed 56px)
- * - Avatar Section (variable, controlled by --avatar-height)
- * - Handle (fixed 24px)
- * - Chat Section (variable, controlled by --chat-height)
- * - Input Layer (fixed 90px)
  */
 
-export const WIDGET_STYLES = `
-/* 
- * System font stack for CSP compliance
- * Avoids @import which violates Content-Security-Policy on strict sites
- * Falls back gracefully across all platforms
- */
-
-/* Reset all inherited styles */
+const CSS_RESET = `
+/* System font stack for CSP compliance */
 :host {
   all: initial;
   display: block;
-  /* System font stack - CSP compliant, no external font loading */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
   color: #1F2937;
   box-sizing: border-box;
+
+  /* Theme Variables */
   --primary-color: #4B4ACF;
   --primary-gradient: linear-gradient(135deg, #4B4ACF 0%, #2E3A87 100%);
   --secondary-color: #1F2937;
   --bg-color: #ffffff;
   --text-color: #1F2937;
+  --text-muted: #9ca3af;
   --input-bg: #f5f5f7;
   --border-color: #e0e0e0;
-  /* Heights - avatar-focus default: avatar 280px (includes 56px behind header) */
+
+  /* Dimensions */
+  --header-height: 56px; 
+  --input-height: 90px;
+  --widget-width: 350px;
+  --border-radius-large: 20px;
+  
+  /* Dynamic Heights */
   --widget-height: 370px;
-  --avatar-height: 280px;  /* avatar-focus default: reduced for less bottom whitespace */
-  --chat-height: 0px;      /* avatar-focus default: no chat */
+  --avatar-height: 280px;  /* avatar-focus default */
+  --chat-height: 0px;      /* avatar-focus default */
+  
+  /* Animation */
   --transition-duration: 300ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.19, 1, 0.22, 1);
 }
 
 :host * {
@@ -54,26 +53,39 @@ export const WIDGET_STYLES = `
 :host(.position-inline) { position: relative; }
 :host(.hidden) { display: none !important; }
 
-/* ==========================================================================
-   Main Container - Flex Column Layout
-   ========================================================================== */
+/* Accessibility */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+`;
+
+const LAYOUT_STYLES = `
+/* Main Container - Flex Column Layout */
 .widget-root {
-  width: 350px;
+  width: var(--widget-width);
   height: var(--widget-height);
   max-height: 80vh;
-  position: relative; /* For absolute positioned input layer */
+  position: relative;
   display: flex;
   flex-direction: column;
-  padding-bottom: 90px; /* Reserve space for absolutely positioned input */
+  padding-bottom: var(--input-height); /* Reserve space for absolutely positioned input */
   background: var(--bg-color);
-  border-radius: 20px;
+  border-radius: var(--border-radius-large);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   border: 1px solid rgba(0,0,0,0.08);
-  transition: height var(--transition-duration) cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: height var(--transition-duration) var(--ease-spring);
 }
 
-/* Position the widget at bottom-right of host */
+/* Position fixes for absolute containers */
 :host(.position-bottom-right) .widget-root,
 :host(.position-bottom-left) .widget-root,
 :host(.position-top-right) .widget-root,
@@ -83,90 +95,68 @@ export const WIDGET_STYLES = `
   right: 0;
 }
 
-@media (max-width: 480px) {
-  .widget-root {
-    width: 100vw;
-    height: 100vh; /* Fallback for older browsers */
-    height: 100dvh; /* Dynamic viewport height - accounts for mobile browser UI */
-    max-height: 100vh;
-    max-height: 100dvh;
-    border-radius: 0;
-    /* Let the mobile media query at the bottom handle the rest */
-    padding-bottom: 90px; /* Ensure input layer space is preserved */
-  }
-}
-
 .widget-root.minimized {
   transform: translateY(20px) scale(0.9);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.3s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease;
+  transition: transform 0.3s var(--ease-smooth), opacity 0.3s ease;
 }
 
-/* ==========================================================================
-   Header Layer (Fixed Height: 56px - NEVER changes)
-   ========================================================================== */
+/* Expanded state - larger widget */
+.widget-root.expanded {
+  width: 500px;
+  height: 600px !important; /* TODO: Remove !important via prop update */
+  --widget-height: 600px;
+}
+
+/* Text-focus overflow overrides */
+[data-drawer-state="text-focus"].widget-root {
+  overflow: visible;
+  border-radius: var(--border-radius-large);
+}
+`;
+
+const HEADER_STYLES = `
+/* Header Layer (Fixed Height) */
 .header-layer {
-  height: 56px !important;
-  min-height: 56px !important;
-  max-height: 56px !important;
+  height: var(--header-height) !important;
+  min-height: var(--header-height) !important;
+  max-height: var(--header-height) !important;
   flex-shrink: 0;
-  flex-grow: 0;
-  padding: 8px 16px 16px 16px; /* Less top padding to move content up */
+  padding: 8px 16px 16px 12px; /* Reduced left padding to pull title left */
   display: flex;
   justify-content: space-between;
   align-items: center;
-  /* Default: transparent when avatar is visible */
   background: transparent;
-  background-color: transparent;
   z-index: 10;
   position: relative;
   transition: background 0.3s ease;
 }
 
-/* Avatar-focus header - ALWAYS transparent */
+/* Header States */
 [data-drawer-state="avatar-focus"] .header-layer {
   background: transparent !important;
-  background-color: transparent !important;
 }
 
-/* Solid header when text-focus (avatar collapsed) - Alcove design */
 [data-drawer-state="text-focus"] .header-layer {
   background: var(--bg-color);
-  height: 70px !important;
-  min-height: 70px !important;
-  max-height: 70px !important;
-  padding-left: 90px; /* Text indentation: 72px avatar + 18px gap */
-  overflow: visible; /* Allow avatar to overflow */
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-}
-
-/* Allow avatar circle to break out of widget in text-focus */
-[data-drawer-state="text-focus"].widget-root {
+  height: var(--header-height) !important;
+  min-height: var(--header-height) !important;
+  max-height: var(--header-height) !important;
+  padding-left: 90px; /* Indent for avatar orbit */
   overflow: visible;
-  border-radius: 20px; /* Preserve rounded corners */
+  border-top-left-radius: var(--border-radius-large);
+  border-top-right-radius: var(--border-radius-large);
+  align-items: center;
 }
 
-/* ==========================================================================
-   Header Avatar Circle (visible only in text-focus mode)
-   ========================================================================== */
-/* Header avatar circle - no longer used, avatar section is repositioned instead */
-.header-avatar-circle {
-  display: none;
-}
-
-.header-avatar-inner {
-  display: none;
-}
-
+/* Content */
 .header-info {
   display: flex;
   flex-direction: column;
-  flex: 1; /* Take available space */
+  flex: 1;
 }
 
-/* Center header text in text-focus mode */
 [data-drawer-state="text-focus"] .header-info {
   text-align: center;
 }
@@ -177,19 +167,8 @@ export const WIDGET_STYLES = `
   gap: 8px;
 }
 
-/* Center title in text-focus */
 [data-drawer-state="text-focus"] .header-title {
   justify-content: center;
-}
-
-.header-title .status-dot {
-  display: none; /* Hidden - removed green light */
-  width: 8px;
-  height: 8px;
-  background-color: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 6px #10b981;
-  flex-shrink: 0;
 }
 
 .header-info h3 {
@@ -200,58 +179,31 @@ export const WIDGET_STYLES = `
   letter-spacing: -0.01em;
 }
 
+/* Buttons */
 .header-buttons {
   display: flex;
   align-items: center;
-  gap: 4px; /* Tight spacing */
-  margin-left: auto; /* Push to right */
+  gap: 2px;
+  margin-left: auto;
+  height: 28px; /* Fixed height for consistent alignment */
 }
 
-/* Expand button - visible in text-focus, hidden in avatar-focus */
-.expand-btn {
-  display: flex;
+/* Tighter spacing in text-focus mode */
+[data-drawer-state="text-focus"] .header-buttons {
+  gap: 0px;
 }
 
-.expand-btn .collapse-icon {
-  display: none;
+[data-drawer-state="text-focus"] .control-btn {
+  width: 26px; /* Reduced width + gap 0 = tighter icons */
 }
 
-[data-drawer-state="avatar-focus"] .expand-btn {
-  display: none;
-}
-
-/* When expanded, show collapse icon */
-.widget-root.expanded .expand-btn .expand-icon {
-  display: none;
-}
-
-.widget-root.expanded .expand-btn .collapse-icon {
-  display: block;
-}
-
-/* Expanded state - larger widget */
-.widget-root.expanded {
-  width: 500px;
-  height: 600px !important;
-  --widget-height: 600px;
-}
-
-/* Expanded text-focus: larger chat area */
-.widget-root.expanded[data-drawer-state="text-focus"] {
-  --chat-height: 454px; /* Expanded chat height */
-}
-
-/* Expanded text-focus: chat section fills available space - uses CSS var */
-.widget-root.expanded[data-drawer-state="text-focus"] .chat-section {
-  height: var(--chat-height);
-}
 
 .control-btn {
   background: transparent;
   border: none;
   color: var(--secondary-color);
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -264,124 +216,59 @@ export const WIDGET_STYLES = `
 .control-btn svg {
   width: 18px;
   height: 18px;
-  stroke-width: 2.5; /* Bolder icons */
+  stroke-width: 2.5;
 }
 
 .control-btn:hover {
   background: rgba(0, 0, 0, 0.08);
 }
 
-/* ==========================================================================
-   View Mode Toggle Button
-   ========================================================================== */
-/* Default: show text icon (we're in avatar-focus), hide avatar icon */
-#viewModeBtn .text-mode-icon {
-  display: block;
-}
+/* View Mode Toggle Button */
+#viewModeBtn .text-mode-icon { display: block; }
+#viewModeBtn .avatar-mode-icon { display: none; }
+[data-drawer-state="text-focus"] #viewModeBtn .text-mode-icon { display: none; }
+[data-drawer-state="text-focus"] #viewModeBtn .avatar-mode-icon { display: block; }
 
-#viewModeBtn .avatar-mode-icon {
-  display: none;
-}
+/* Expand Button Visibility */
+.expand-btn { display: flex; }
+.expand-btn .collapse-icon { display: none; }
+[data-drawer-state="avatar-focus"] .expand-btn { display: none; }
 
-/* In text-focus mode: show avatar icon, hide text icon */
-[data-drawer-state="text-focus"] #viewModeBtn .text-mode-icon {
-  display: none;
-}
+.widget-root.expanded .expand-btn .expand-icon { display: none; }
+.widget-root.expanded .expand-btn .collapse-icon { display: block; }
+`;
 
-[data-drawer-state="text-focus"] #viewModeBtn .avatar-mode-icon {
-  display: block;
-}
-
-/* ==========================================================================
-   Avatar Section (Variable Height - extends behind header)
-   ========================================================================== */
+const AVATAR_STYLES = `
+/* Avatar Section (Variable Height) */
 .avatar-section {
   height: var(--avatar-height);
   min-height: 0;
   flex-shrink: 0;
-  flex-grow: 0;
   position: relative;
-  overflow: visible; /* Allow avatar to overflow into header */
-  margin-top: -56px; /* Pull up behind header (header height) */
-  padding-top: 56px; /* Compensate so content stays in place */
-  transition: height var(--transition-duration) cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-/* When in text-focus mode, reposition avatar as "Mascot" orb */
-[data-drawer-state="text-focus"] .avatar-section {
-  position: absolute;
-  left: -25px; /* Hangs off the left edge */
-  top: -10px; /* Equator aligns with card top - anchored feel */
-  transform: none;
-  width: 90px; /* Bigger Mascot size */
-  height: 90px;
-  border-radius: 50%;
   overflow: visible;
-  z-index: 100; /* Float above everything */
-  background: white; /* White background for the orb */
-  
-  /* The Casing - thick white border */
-  border: 4px solid #FFFFFF;
-  
-  /* Softer shadow - mainly downwards (porthole, not sticker) */
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    
-  margin-top: 0;
-  padding-top: 0;
-  transition: none;
-}
-
-/* Clip avatar content to circle but allow status dot to overflow */
-[data-drawer-state="text-focus"] .avatar-stage {
-  border-radius: 50%;
-  overflow: hidden;
-}
-
-/* Green status dot on avatar circle in text-focus mode - HIDDEN */
-[data-drawer-state="text-focus"] .avatar-section::after {
-  display: none;
-}
-
-/* Hide status dot from header text in text-focus mode */
-[data-drawer-state="text-focus"] .header-title .status-dot {
-  display: none;
-}
-
-[data-drawer-state="text-focus"] .avatar-stage {
-  background: white;
-}
-
-/* Keep canvas at full resolution for quality, just reposition to show face in circle */
-[data-drawer-state="text-focus"] .avatar-render-container {
-  width: 800px;
-  height: 800px;
-  top: 58%; /* Adjust for 80px circle */
-  left: 50%;
-  transform: translate(-50%, -50%) scale(0.24); /* Zoomed out 5% for porthole effect - show shoulders */
+  margin-top: calc(var(--header-height) * -1); /* Pull up behind header */
+  padding-top: var(--header-height);
+  transition: height var(--transition-duration) var(--ease-spring);
 }
 
 .avatar-stage {
   position: absolute;
-  top: 0; /* Fills from the pulled-up position (behind header) */
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: radial-gradient(circle at center 40%, #f0f4ff 0%, #ffffff 80%);
   overflow: hidden;
 }
 
-/* Avatar Render Container (Injected by LazyAvatar) */
+/* Avatar Canvas Container */
 .avatar-render-container {
   width: 800px;
   height: 800px;
   position: absolute;
-  /* Position avatar lower in its box */
-  top: 55%;
+  top: 48%;
   left: 50%;
   transform: translate(-50%, -50%) scale(0.70);
   transform-origin: center center;
   pointer-events: none;
-  z-index: 5; /* Below header but visible */
+  z-index: 5;
 }
 
 .avatar-render-container canvas {
@@ -390,142 +277,110 @@ export const WIDGET_STYLES = `
   object-fit: contain;
 }
 
-/* Avatar position adjustment for avatar-focus mode - balanced for reduced widget height */
 [data-drawer-state="avatar-focus"] .avatar-render-container {
-  top: 52%;
+  top: 45%;
 }
 
-/* ==========================================================================
-   Avatar Mist Overlay - Permanent gradient to hide messy splat edges
-   Creates seamless fade from avatar into white background
-   ========================================================================== */
+/* Avatar Mist Overlay */
 .avatar-mist-overlay {
   position: absolute;
-  bottom: -40px; /* Lowered significantly to match avatar position */
+  bottom: -40px;
   left: 0;
   width: 100%;
-  height: 140px; /* Increased height to cover more area */
-  
-  /* The Magic Gradient: Transparent top -> Solid White bottom */
+  height: 140px;
   background: linear-gradient(to bottom, 
     rgba(255, 255, 255, 0) 0%, 
     rgba(255, 255, 255, 0.7) 45%,
     rgba(255, 255, 255, 0.9) 70%,
     #FFFFFF 100%
   );
-  
-  z-index: 10; /* ON TOP of avatar, BEHIND text/input */
-  pointer-events: none; /* Let clicks pass through */
+  z-index: 10;
+  pointer-events: none;
+  display: none;
 }
 
-/* Only show mist in avatar-focus mode */
 [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
   display: block;
 }
 
-/* Hide mist in text-focus mode */
-[data-drawer-state="text-focus"] .avatar-mist-overlay {
-  display: none;
+/* Text-Focus Mode Transformations (Mascot Orb) */
+[data-drawer-state="text-focus"] .avatar-section {
+  position: absolute;
+  left: -25px;
+  top: -6px;
+  transform: none;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  overflow: visible;
+  z-index: 100;
+  background: white;
+  border: 4px solid #FFFFFF;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  margin-top: 0;
+  padding-top: 0; /* Reset compensation padding */
+  transition: none;
 }
 
-/* ==========================================================================
-   Avatar Subtitles - Floating Text in the Mist (visible only in avatar-focus mode)
-   Clean, minimal text floating in the white mist zone
-   ========================================================================== */
+[data-drawer-state="text-focus"] .avatar-stage {
+  border-radius: 50%;
+  background: white;
+}
+
+[data-drawer-state="text-focus"] .avatar-render-container {
+  top: 58%;
+  transform: translate(-50%, -50%) scale(0.24); /* Zoomed out for orb */
+}
+`;
+
+const OVERLAY_UI_STYLES = `
+/* Subtitles */
 .avatar-subtitles {
   display: none;
   position: absolute;
-  bottom: 0px; /* Balanced position in the mist zone */
-  left: 0;
-  right: 0;
+  bottom: 0px;
+  left: 0; right: 0;
   margin: 0 auto;
   text-align: center;
-  
-  /* Typography - Compact and readable */
-  font-family: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 13px;
-  font-weight: 500; /* Medium - not bold, less aggressive */
-  line-height: 1.4;
-  letter-spacing: -0.01em;
-  color: #374151; /* Soft Dark Grey - easier on the eyes */
-  
-  /* NO background box - floating text */
+  font-weight: 500;
+  color: #374151;
   background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
   padding: 0 16px;
-  
-  /* Tiny shadow to lift it off the mist */
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
-  
-  /* Layout - constrained width for compact display */
-  z-index: 25; /* Above the mist layer (mist is z-index 10) */
-  max-width: 320px; /* Constrain width for shorter subtitles */
+  z-index: 25;
+  max-width: 320px;
   width: fit-content;
-  
-  /* Single line with ellipsis fallback */
   white-space: nowrap;
   overflow: hidden;
-  
-  /* Smooth appearance */
   opacity: 0;
   transition: opacity 0.3s ease;
-}
-
-/* Fade in animation */
-@keyframes subtitleFadeIn {
-  from { 
-    opacity: 0; 
-    transform: translateY(4px);
-  }
-  to { 
-    opacity: 1; 
-    transform: translateY(0);
-  }
 }
 
 .avatar-subtitles.visible {
   animation: subtitleFadeIn 0.3s ease forwards;
 }
 
-/* Only show subtitles in avatar-focus mode */
 [data-drawer-state="avatar-focus"] .avatar-subtitles {
   display: block;
 }
 
-/* Hide subtitles in text-focus mode */
-[data-drawer-state="text-focus"] .avatar-subtitles {
-  display: none !important;
-}
-
-/* Show when has content */
 [data-drawer-state="avatar-focus"] .avatar-subtitles:not(:empty) {
   opacity: 1;
 }
 
-/* Hide when empty */
 .avatar-subtitles:empty {
   opacity: 0 !important;
   pointer-events: none;
 }
 
-/* User subtitle style - accent color, no box */
-.avatar-subtitles.user-speaking {
-  color: #4B4ACF;
-}
+.avatar-subtitles.user-speaking { color: var(--primary-color); }
+.avatar-subtitles .subtitle-current { color: var(--primary-color); font-weight: 600; }
 
-/* Karaoke-style highlight for current word being spoken */
-.avatar-subtitles .subtitle-current {
-  color: #4B4ACF;
-  font-weight: 600;
-}
-
-/* ==========================================================================
-   Avatar Suggestions (visible only in avatar-focus mode)
-   ========================================================================== */
+/* Suggestions */
 .avatar-suggestions {
-  display: none;
+  display: none; /* Flex when active */
   position: absolute;
   bottom: 6px;
   left: 50%;
@@ -541,17 +396,15 @@ export const WIDGET_STYLES = `
   z-index: 15;
 }
 
-/* Show only in avatar-focus mode */
 [data-drawer-state="avatar-focus"] .avatar-suggestions {
   display: flex;
 }
 
-/* Hide when conversation has started */
 .widget-root.has-messages .avatar-suggestions {
   display: none !important;
 }
 
-.avatar-suggestions .suggestion-chip {
+.suggestion-chip {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid var(--border-color);
   color: var(--primary-color);
@@ -565,119 +418,94 @@ export const WIDGET_STYLES = `
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.avatar-suggestions .suggestion-chip:hover {
+.suggestion-chip:hover {
   background: var(--primary-color);
   color: white;
   border-color: var(--primary-color);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(75, 74, 207, 0.25);
 }
+`;
 
-/* ==========================================================================
-   Section Divider (simple line between avatar and chat)
-   ========================================================================== */
-.section-divider {
-  display: none; /* Removed - using gradient fade instead */
-}
-
-/* ==========================================================================
-   Chat Section (Variable Height)
-   ========================================================================== */
+const CHAT_STYLES = `
+/* Chat Section */
 .chat-section {
   height: var(--chat-height);
   min-height: 0;
   flex-shrink: 0;
-  flex-grow: 0;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
   background: var(--bg-color);
-  margin-top: 0; /* No overlap - give avatar space */
-  z-index: 5; /* Above avatar */
-  transition: height var(--transition-duration) cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 5;
+  transition: height var(--transition-duration) var(--ease-spring);
 }
 
-/* Fade gradient at top of chat for smooth text disappear */
+/* Gradient fade at top */
 .chat-section::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0; left: 0; right: 0;
   height: 30px;
   background: linear-gradient(to bottom, var(--bg-color) 0%, transparent 100%);
   pointer-events: none;
   z-index: 10;
 }
 
-/* Remove overlap in text-focus mode */
 [data-drawer-state="text-focus"] .chat-section {
   margin-top: 0;
 }
 
-/* Chat Messages */
+/* Expanded State Logic */
+.widget-root.expanded[data-drawer-state="text-focus"] {
+  --chat-height: 454px;
+}
+.widget-root.expanded[data-drawer-state="text-focus"] .chat-section {
+  height: var(--chat-height);
+}
+
+/* Messages */
 .chat-messages {
   flex: 1;
   padding: 12px 16px 4px 16px;
-  overflow-y: auto;  /* Only show scrollbar when needed */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  /* Scrollbar styling - minimal and hidden until hover/scroll */
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-  opacity: 0; /* Hidden initially - show when has messages */
+  opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
 }
 
-/* Add top padding in text-focus so messages don't start under avatar */
 [data-drawer-state="text-focus"] .chat-messages {
   padding-top: 20px;
 }
 
-/* Show scrollbar on hover */
-.chat-messages:hover {
-  scrollbar-color: rgba(0,0,0,0.15) transparent;
-}
-
-/* Show chat messages when conversation has started */
 .widget-root.has-messages .chat-messages {
   opacity: 1;
   pointer-events: auto;
 }
 
-.chat-messages::-webkit-scrollbar {
-  width: 3px;
-}
+/* Scrollbar hover effect */
+.chat-messages:hover { scrollbar-color: rgba(0,0,0,0.15) transparent; }
 
-.chat-messages::-webkit-scrollbar-track {
-  background: transparent;
-}
+.chat-messages::-webkit-scrollbar { width: 3px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
+.chat-messages:hover::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.15); }
 
-.chat-messages::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 3px;
-  transition: background-color 0.2s ease;
-}
-
-.chat-messages:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(0,0,0,0.15);
-}
-
-/* Quick Replies (shown when no messages) */
+/* Quick Replies (Empty State) */
 .quick-replies {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center; /* Center horizontally */
+  align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 12px 16px 24px 16px;
   transition: opacity 0.2s ease;
 }
 
@@ -686,106 +514,21 @@ export const WIDGET_STYLES = `
   pointer-events: none;
 }
 
-.suggestion-chip {
+.quick-replies .suggestion-chip {
   background: var(--input-bg);
-  border: 1px solid var(--border-color);
-  color: var(--primary-color);
-  padding: 6px 12px;
-  border-radius: 16px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
+  backdrop-filter: none;
+  padding: 7px 12px;
+  font-size: 11px;
+  box-shadow: none;
 }
 
-.suggestion-chip:hover {
+.quick-replies .suggestion-chip:hover {
   background: var(--primary-color);
   color: white;
   border-color: var(--primary-color);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(75, 74, 207, 0.25);
 }
 
-/* Typing Indicator - absolutely positioned at bottom, floats on top of messages */
-.typing-indicator {
-  display: none;
-  position: absolute;
-  bottom: 8px;
-  left: 16px;
-  padding: 6px 12px;
-  background: var(--input-bg);
-  border-radius: 12px;
-  z-index: 10;
-}
-
-.typing-indicator.visible {
-  display: flex;
-}
-
-.typing-dots {
-  display: flex;
-  gap: 4px;
-  padding: 4px 2px;
-}
-
-.typing-dots span {
-  width: 6px;
-  height: 6px;
-  background: #b0b0b0;
-  border-radius: 50%;
-  animation: typingBounce 1.4s infinite ease-in-out both;
-}
-
-.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
-.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-
-@keyframes typingBounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
-}
-
-/* ==========================================================================
-   Input Layer (Fixed Height: 90px - ABSOLUTELY positioned at bottom)
-   ========================================================================== */
-.input-layer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 90px !important;
-  min-height: 90px !important;
-  max-height: 90px !important;
-  background: var(--bg-color);
-  z-index: 100; /* Above everything */
-}
-
-/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
-[data-drawer-state="text-focus"] .input-layer {
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
-}
-
-/* Upward gradient to soften the hard edge where footer meets chat - only in text-focus mode */
-[data-drawer-state="text-focus"] .input-layer::before {
-  content: '';
-  position: absolute;
-  top: -20px;
-  left: 0;
-  right: 0;
-  height: 20px;
-  background: linear-gradient(to top, var(--bg-color) 0%, transparent 100%);
-  pointer-events: none;
-}
-
-/* No gradient in avatar-focus mode - subtitles need to be crisp */
-[data-drawer-state="avatar-focus"] .input-layer::before {
-  display: none;
-}
-
-/* ==========================================================================
-   Message Styles
-   ========================================================================== */
+/* Message Bubbles */
 .message {
   display: flex;
   flex-direction: column;
@@ -794,42 +537,30 @@ export const WIDGET_STYLES = `
   margin-bottom: 4px;
 }
 
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.message.user {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.message.assistant {
-  align-self: flex-start;
-  align-items: stretch;
-}
+.message.user { align-self: flex-end; align-items: flex-end; }
+.message.assistant { align-self: flex-start; align-items: stretch; }
 
 .message-bubble {
   padding: 10px 16px;
   border-radius: 18px;
   font-size: 13px;
   font-weight: 400;
-  line-height: 1.6; /* Breathing room for readability */
+  line-height: 1.6;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 .message.user .message-bubble {
-  background: var(--primary-color);  /* Solid brand color */
+  background: var(--primary-color);
   color: white;
   border-bottom-right-radius: 4px;
 }
 
 .message.assistant .message-bubble {
-  background: #FFFFFF; /* White card */
-  color: #374151; /* Dark text */
+  background: #FFFFFF;
+  color: #374151;
   border-bottom-left-radius: 4px;
-  border: 1px solid #F3F4F6; /* Very subtle border for definition */
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06); /* Soft shadow - creates elevation */
+  border: 1px solid #F3F4F6;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
 .message-footer {
@@ -841,60 +572,88 @@ export const WIDGET_STYLES = `
   min-height: 20px;
 }
 
-.message-time {
-  font-size: 11px;
-  color: #9ca3af;
+.message-time { font-size: 11px; color: var(--text-muted); }
+
+/* Typing Indicator */
+.typing-indicator {
+  display: none;
+  position: absolute;
+  bottom: 8px; left: 16px;
+  padding: 6px 12px;
+  background: var(--input-bg);
+  border-radius: 12px;
+  z-index: 10;
+}
+.typing-indicator.visible { display: flex; }
+
+.typing-dots { display: flex; gap: 4px; padding: 4px 2px; }
+.typing-dots span {
+  width: 6px; height: 6px;
+  background: #6b7280;
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+`;
+
+const INPUT_STYLES = `
+/* Input Layer (Fixed Height) */
+.input-layer {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: var(--input-height) !important;
+  min-height: var(--input-height) !important;
+  max-height: var(--input-height) !important;
+  background: var(--bg-color);
+  z-index: 100;
 }
 
-/* Chat Input Area */
+/* Curved corners in text focus */
+[data-drawer-state="text-focus"] .input-layer,
+[data-drawer-state="text-focus"] .chat-input-area {
+  border-bottom-left-radius: var(--border-radius-large);
+  border-bottom-right-radius: var(--border-radius-large);
+}
+
+/* Input Gradient Overlay */
+[data-drawer-state="text-focus"] .input-layer::before {
+  content: '';
+  position: absolute;
+  top: -20px; left: 0; right: 0;
+  height: 20px;
+  background: linear-gradient(to top, var(--bg-color) 0%, transparent 100%);
+  pointer-events: none;
+}
+
 .chat-input-area {
   padding: 16px;
   background: var(--bg-color);
   flex-shrink: 0;
 }
 
-/* Curved bottom corners for text-focus mode (since widget-root has overflow: visible) */
-[data-drawer-state="text-focus"] .chat-input-area {
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
-}
-
-.chat-input-wrapper {
-  margin-bottom: 8px;
-}
+.chat-input-wrapper { margin-bottom: 8px; }
 
 .chat-input-controls {
   display: flex;
   gap: 10px;
   align-items: center;
-  flex: 1; /* Ensure it takes width */
+  flex: 1;
 }
 
-/* Button Swapping Logic -> Co-existence Logic */
-
-/* Mic: Always visible */
 .chat-input-controls #micBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent; /* Subtle background */
-  width: 40px;
-  height: 40px;
-  color: #6b7280; /* Gray when inactive */
+  background: transparent;
+  width: 40px; height: 40px;
+  color: var(--secondary-color);
   margin-left: 4px;
 }
 .chat-input-controls #micBtn:hover {
   background: #f3f4f6;
   color: var(--primary-color);
   transform: scale(1.05);
-}
-
-
-
-
-@keyframes popIn {
-  from { transform: scale(0); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
 }
 
 #chatInput {
@@ -916,7 +675,7 @@ export const WIDGET_STYLES = `
 
 .input-button {
   background: transparent;
-  color: #9ca3af;
+  color: var(--text-muted);
   border: none;
   cursor: pointer;
   padding: 8px;
@@ -930,9 +689,6 @@ export const WIDGET_STYLES = `
   color: var(--primary-color);
 }
 
-.input-button#micBtn {
-  color: var(--text-color);
-}
 .input-button.recording {
   color: #e74c3c !important;
   background: rgba(231, 76, 60, 0.1);
@@ -942,28 +698,19 @@ export const WIDGET_STYLES = `
 .branding {
   text-align: center;
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--text-muted);
   margin-top: 4px;
 }
+.branding a { color: #7986cb; text-decoration: none; }
+.branding a:hover { text-decoration: underline; }
+`;
 
-.branding a {
-  color: #7986cb;
-  text-decoration: none;
-}
-.branding a:hover {
-  text-decoration: underline;
-}
-
-/* ==========================================================================
-   Launcher Bubble (New Face Design)
-   ========================================================================== */
+const LAUNCHER_STYLES = `
+/* Launcher Bubble */
 :host(.collapsed) {
-  width: auto !important;
-  height: auto !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  top: auto !important;
-  left: auto !important;
+  width: auto !important; height: auto !important;
+  bottom: 20px !important; right: 20px !important;
+  top: auto !important; left: auto !important;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -976,71 +723,53 @@ export const WIDGET_STYLES = `
 }
 
 .chat-bubble {
-  width: 64px;
-  height: 64px;
+  width: 64px; height: 64px;
   border-radius: 50%;
   background: var(--bg-color);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
   cursor: pointer;
   position: relative;
-  /* Removed overflow: hidden so status dot can sit on the rim */
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.3s var(--ease-spring);
   z-index: 20;
 }
 
-.chat-bubble:hover {
-  transform: scale(1.1);
-}
+.chat-bubble:hover { transform: scale(1.1); }
 
 .bubble-avatar-preview {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
   background: white;
-  border-radius: 50%; /* moved radius here */
-  overflow: hidden; /* moved clip here for image */
+  border-radius: 50%;
+  overflow: hidden;
 }
 
-.avatar-face-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.avatar-face-img, .avatar-fallback-icon {
+  width: 100%; height: 100%;
 }
-
+.avatar-face-img { object-fit: cover; }
 .avatar-fallback-icon {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   background: var(--primary-gradient);
   color: white;
 }
 
 .bubble-avatar-preview .status-dot {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 14px;
-  height: 14px;
+  position: absolute; bottom: 0; right: 0;
+  width: 14px; height: 14px;
   background: #10b981;
   border: 2px solid white;
   border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   z-index: 5;
 }
 
-/* Tooltip (Proactive Reach Out) */
+/* Tooltip */
 .bubble-tooltip-wrapper {
   position: absolute;
-  right: 74px; /* Left of the bubble */
-  top: 50%;
+  right: 74px; top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
-  width: max-content; /* Ensure it takes needed space */
-  max-width: 240px; /* Increased to allow 2 lines */
+  width: max-content; /* Allow natural width */
+  max-width: 240px;
   display: flex;
   justify-content: flex-end;
 }
@@ -1049,58 +778,61 @@ export const WIDGET_STYLES = `
   pointer-events: auto;
   background: white;
   color: #333;
-  padding: 10px 14px; /* Slightly more compact */
+  padding: 10px 14px;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-  font-size: 13px; /* Slightly smaller text */
+  font-size: 13px;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 10px;
   opacity: 0;
   transform: translateX(10px);
-  animation: tooltipSlideIn 0.5s cubic-bezier(0.19, 1, 0.22, 1) 1.5s forwards;
+  animation: tooltipSlideIn 0.5s var(--ease-smooth) 1.5s forwards;
   position: relative;
 }
 
-.bubble-tooltip.hidden {
-  display: none;
-}
+.bubble-tooltip.hidden { display: none; }
 
 .bubble-tooltip::after {
   content: '';
   position: absolute;
-  right: -6px;
-  top: 50%;
-  width: 12px;
-  height: 12px;
+  right: -6px; top: 50%;
+  width: 12px; height: 12px;
   background: white;
-  transform: translateY(-50%) rotate(45deg); /* Diamond shape, centered */
-  border-radius: 2px;
+  transform: translateY(-50%) rotate(45deg);
 }
 
 .tooltip-close {
-  background: none;
-  border: none;
-  color: var(--text-muted, #9ca3af);
+  background: none; border: none;
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 18px;
-  padding: 0;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 20px; height: 20px;
   border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
 }
-.tooltip-close:hover {
-  background: var(--input-bg);
-  color: var(--text-color);
+.tooltip-close:hover { background: var(--input-bg); color: var(--text-color); }
+`;
+
+const ANIMATIONS = `
+@keyframes subtitleFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes tooltipSlideIn {
-  to { opacity: 1; transform: translateX(0); }
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 @keyframes recordPulse {
@@ -1108,250 +840,181 @@ export const WIDGET_STYLES = `
   50% { transform: scale(1.1); }
 }
 
-/* ==========================================================================
-   Mobile Full Screen Takeover
-   ========================================================================== */
+@keyframes tooltipSlideIn {
+  to { opacity: 1; transform: translateX(0); }
+}
+`;
+
+const MOBILE_STYLES = `
+/* Mobile Overrides (Consolidated) */
 @media (max-width: 480px) {
-  :host(:not(.collapsed)) {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
+  /* Prevent iOS Zoom on Input */
+  #chatInput { font-size: 16px !important; }
+
+  :host(:not(.collapsed)),
+  .widget-root {
     width: 100% !important;
     height: 100% !important;
     max-width: none !important;
-    max-height: none !important;
+    max-height: 100dvh !important;
     border-radius: 0 !important;
-    z-index: 9999999 !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    position: fixed !important;
   }
-  
+
   :host(:not(.collapsed)) .widget-root {
-    width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    border-radius: 0 !important;
     border: none !important;
-    /* Override CSS custom properties for mobile full-screen */
-    --widget-height: 100% !important;
+    padding-bottom: var(--input-height);
   }
-  
-  /* Avatar-focus mode on mobile: avatar takes most of the space */
+
+  /* Dynamic viewport sizes */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] {
-    --avatar-height: calc(100vh - 56px - 90px) !important; /* Fallback */
-    --avatar-height: calc(100dvh - 56px - 90px) !important; /* Full height minus header and input */
-    background: transparent !important; /* Let avatar stage show through */
+    --avatar-height: calc(100dvh - var(--header-height) - var(--input-height)) !important;
+    background: transparent !important;
   }
   
+  /* Make header bigger on mobile */
+  :host(:not(.collapsed)) .chat-header-overlay { padding: 12px 16px; }
+  
+  /* Disable expanded state */
+  :host(:not(.collapsed)) .widget-root.expanded { width: 100% !important; height: 100% !important; }
+  .expand-btn { display: none !important; }
+
+  /* Adjustments for Avatar Focus */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-section {
-    height: 100% !important; /* Full height */
+    height: 100% !important;
+    width: 100% !important;
     margin-top: 0 !important;
     padding-top: 0 !important;
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 90px; /* Above input */
-  }
-  
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: auto !important;
+    top: 0; bottom: var(--input-height);
   }
   
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-render-container {
-    top: 50%;
-    left: 50%;
     transform: translate(-50%, -50%) scale(0.85); /* Larger on mobile */
   }
-  
-  /* Header in avatar-focus mode on mobile - solid color, not transparent */
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .header-layer,
-  [data-drawer-state="avatar-focus"] .header-layer,
-  .widget-root[data-drawer-state="avatar-focus"] .header-layer {
-    background: #ffffff !important;
-    background-color: #ffffff !important;
-  }
-  
-  /* Use solid white background for avatar stage on mobile - matches input/chat */
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
-    background: #ffffff !important; /* Pure white for light theme */
-  }
-  
-  /* Text-focus mode on mobile: chat takes most of the space, avatar in corner */
-  :host(:not(.collapsed)) [data-drawer-state="text-focus"] {
-    --chat-height: calc(100vh - 70px - 90px) !important; /* Fallback */
-    --chat-height: calc(100dvh - 70px - 90px) !important; /* Full height minus header and input */
-  }
-  
-  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .chat-section {
-    height: calc(100vh - 70px - 90px) !important; /* Fallback */
-    height: calc(100dvh - 70px - 90px) !important;
-    flex: 1;
-  }
-  
-  /* Avatar orb in text-focus stays same size but repositioned for mobile */
-  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-section {
-    left: -15px; /* Less overhang on mobile */
-    top: -5px;
-    width: 70px; /* Slightly smaller on mobile */
-    height: 70px;
-    border-width: 3px;
-  }
-  
-  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-render-container {
-    transform: translate(-50%, -50%) scale(0.20); /* Scaled for smaller orb */
+
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .header-layer {
+    background: var(--bg-color) !important;
   }
 
-  /* Make header bigger on mobile */
-  :host(:not(.collapsed)) .chat-header-overlay {
-    padding: 16px;
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-stage {
+    background: var(--bg-color) !important;
   }
-  
-  /* Adjust header text indent for smaller avatar orb in text-focus */
-  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .header-layer {
-    padding-left: 70px; /* Reduced from 90px for smaller mobile avatar */
+
+  /* Adjustments for Text Focus */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] {
+    --chat-height: calc(100dvh - var(--header-height) - var(--input-height)) !important;
   }
-  
-  /* Reposition avatar orb in text-focus mode on mobile - no overflow */
+
+  /* Resize avatar circle for mobile */
   :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-section {
-    left: 10px; /* Inside the widget, not hanging off */
-    top: 8px; /* Moved down to stay within bounds */
+    left: 12px; top: 12px; /* Better alignment */
+    width: 50px; height: 50px; /* Smaller distinct circle */
+    border-width: 2px;
   }
   
-  /* Disable expanded state on mobile - already full screen */
-  :host(:not(.collapsed)) .widget-root.expanded {
-    width: 100% !important;
-    height: 100% !important;
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .header-layer {
+    padding-left: 72px; /* 12px + 50px + 10px */
+  }
+
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .avatar-render-container {
+    top: 58% !important; /* Move up for better centering */
+    transform: translate(-50%, -50%) scale(0.16);
+  }
+
+  /* Restore header button sizes in text mode on mobile */
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .control-btn {
+    width: 28px !important;
   }
   
-  /* Hide expand button on mobile */
-  :host(:not(.collapsed)) .expand-btn {
-    display: none !important;
+  :host(:not(.collapsed)) [data-drawer-state="text-focus"] .header-buttons {
+    gap: 2px !important;
   }
   
-  /* Larger suggestion chips on mobile - balanced between avatar and input */
+  /* Suggestions & Mist */
+  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
+    display: block;
+    bottom: 0;
+    height: 35vh;
+  }
+
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions {
-    bottom: 110px; /* Similar position to subtitles, above input */
+    bottom: 110px; 
     width: 95%;
     max-width: none;
     gap: 6px;
     padding: 4px;
+    transition: opacity 0.2s ease;
   }
-  
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-suggestions .suggestion-chip {
-    padding: 8px 12px;
-    font-size: 13px;
-    border-radius: 16px;
-  }
-  
-  /* Mist overlay on mobile - covers lower portion without reaching avatar's face */
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
-    display: block;
-    bottom: 0;
-    height: 35vh; /* Cover lower third of screen */
-  }
-  
-  /* Subtitles on mobile - positioned between avatar and input */
+
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-subtitles {
     display: block;
-    bottom: 100px; /* Above input (90px) + some padding */
+    bottom: 100px;
     max-width: 90%;
     width: auto;
     font-size: 15px;
-    white-space: normal; /* Allow wrapping on mobile */
-    line-height: 1.5;
+    white-space: normal;
     padding: 0 20px;
   }
-  
-  :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-subtitles:not(:empty) {
-    opacity: 1;
-  }
-}
 
-/* Accessibility */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border-width: 0;
-}
-
-/* ==========================================================================
-   Mobile Keyboard Visible State
-   Resize avatar when virtual keyboard appears on mobile
-   ========================================================================== */
-@media (max-width: 480px) {
-  /* When keyboard is visible, shrink the avatar section */
+  /* Keyboard Visible / Input Focus State */
+  /* This ensures styles apply when keyboard is up or user is typing */
   .widget-root.keyboard-visible {
-    --avatar-height: 180px;
+    --avatar-height: var(--keyboard-available-height, 180px);
   }
-  
-  /* Scale down the avatar render and push it down */
-  .widget-root.keyboard-visible .avatar-render-container {
-    transform: translate(-50%, -35%) scale(0.65) !important;
-    transition: transform 0.3s ease;
+  .widget-root.input-focused {
+    --avatar-height: 180px; 
   }
-  
-  /* Show subtitles but position them properly */
-  .widget-root.keyboard-visible .avatar-subtitles {
-    display: block !important;
-    bottom: 100px !important;
-    font-size: 14px;
-  }
-  
-  /* Hide mist to save space */
-  .widget-root.keyboard-visible .avatar-mist-overlay {
+
+  /* Hide mist overlay during typing to clear view */
+  .widget-root.keyboard-visible .avatar-mist-overlay,
+  .widget-root.input-focused .avatar-mist-overlay {
     display: none !important;
   }
-  
-  /* Move suggestions closer to input */
-  .widget-root.keyboard-visible .avatar-suggestions {
-    bottom: 95px !important;
+
+  /* Move avatar to stay visible just above input when keyboard is open */
+  .widget-root.keyboard-visible[data-drawer-state="avatar-focus"] .avatar-render-container {
+    transform: translate(-50%, -12%) scale(0.50) !important;
+    transition: transform 0.3s var(--ease-spring);
   }
-  
-  /* In text-focus mode with keyboard, ensure chat doesn't overflow */
-  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .chat-section {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    height: auto !important;
+  .widget-root.input-focused[data-drawer-state="avatar-focus"] .avatar-render-container { 
+    transform: translate(-50%, -40%) scale(0.55) !important; 
+    transition: transform 0.3s var(--ease-spring);
   }
-  
-  /* Force the avatar orb to stay properly positioned when keyboard is visible */
+
+  /* Text-focus mode: move avatar orb just above input when keyboard is visible */
   .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-section {
-    position: absolute !important;
-    top: 8px !important;
-    left: 10px !important;
-    /* Force GPU layer to ensure canvas follows */
-    will-change: transform;
-    transform: translateZ(0);
+    top: auto !important;
+    bottom: calc(var(--input-height) + 25px) !important;
+    left: 12px !important;
+    transform: none;
   }
-  
-  /* Force avatar stage to clip properly */
-  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-stage {
-    position: relative !important;
-    width: 100% !important;
-    height: 100% !important;
-    overflow: hidden !important;
+
+  /* Text-focus mode: move quick replies to bottom near avatar orb when keyboard is visible */
+  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .quick-replies {
+    justify-content: flex-end;
+    padding-bottom: 64px;
   }
-  
-  /* Ensure avatar canvas stays properly centered in the orb when keyboard is visible */
-  .widget-root.keyboard-visible[data-drawer-state="text-focus"] .avatar-render-container {
-    position: absolute !important;
-    top: 58% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) scale(0.20) !important;
-    /* Force repaint */
-    will-change: transform;
+
+  /* Text-mode: match avatar-mode pill style (white with shadow) on mobile */
+  .quick-replies .suggestion-chip {
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
 }
+`;
+
+export const WIDGET_STYLES = `
+  ${CSS_RESET}
+  ${LAYOUT_STYLES}
+  ${HEADER_STYLES}
+  ${AVATAR_STYLES}
+  ${OVERLAY_UI_STYLES}
+  ${CHAT_STYLES}
+  ${INPUT_STYLES}
+  ${LAUNCHER_STYLES}
+  ${ANIMATIONS}
+  ${MOBILE_STYLES}
 `;

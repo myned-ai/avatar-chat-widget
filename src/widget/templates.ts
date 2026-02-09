@@ -13,12 +13,8 @@ export const WIDGET_TEMPLATE = `
 <div class="widget-root" data-drawer-state="avatar-focus">
   <!-- Header (fixed height, always visible) -->
   <div class="header-layer">
-    <!-- Avatar circle for text-focus mode (real avatar canvas will be moved here) -->
-    <div class="header-avatar-circle" id="headerAvatarCircle">
-      <div class="header-avatar-inner" id="headerAvatarInner">
-        <!-- Canvas will be moved here in text-focus mode -->
-      </div>
-    </div>
+    <!-- Header Info -->
+
     <div class="header-info">
       <div class="header-title">
         <span class="status-dot"></span>
