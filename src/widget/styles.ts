@@ -307,7 +307,7 @@ const AVATAR_STYLES = `
 [data-drawer-state="text-focus"] .avatar-section {
   position: absolute;
   left: -25px;
-  top: -6px;
+  top: -12px;
   transform: none;
   width: 90px;
   height: 90px;
@@ -329,7 +329,7 @@ const AVATAR_STYLES = `
 
 [data-drawer-state="text-focus"] .avatar-render-container {
   top: 58%;
-  transform: translate(-50%, -50%) scale(0.24); /* Zoomed out for orb */
+  transform: translate(-50%, -50%) scale(0.26); /* Zoomed out for orb */
 }
 `;
 
