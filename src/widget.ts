@@ -442,6 +442,18 @@ class AvatarChatElement extends HTMLElement {
           inputControls.classList.remove('has-text');
         }
       });
+      // Toggle input-focused class for mobile styles
+      chatInput.addEventListener('focus', () => {
+        const root = this.shadow.querySelector('.widget-root');
+        if (root) root.classList.add('input-focused');
+      });
+      chatInput.addEventListener('blur', () => {
+        // Small delay to allow click events on suggestions to fire before hiding
+        setTimeout(() => {
+          const root = this.shadow.querySelector('.widget-root');
+          if (root) root.classList.remove('input-focused');
+        }, 100);
+      });
     }
 
     // Quick Replies Logic
@@ -542,6 +554,11 @@ class AvatarChatElement extends HTMLElement {
         // Keyboard is open - add class to trigger CSS resize
         widgetRoot.classList.add('keyboard-visible');
         
+        // Set actual available height as CSS variable for dynamic sizing
+        const inputHeight = 90; // matches --input-height
+        const availableHeight = currentHeight - inputHeight;
+        widgetRoot.style.setProperty('--keyboard-available-height', `${availableHeight}px`);
+        
         // Force avatar container to recalculate position (fixes WebGL canvas offset)
         const avatarSection = this.shadow.querySelector('.avatar-section') as HTMLElement;
         if (avatarSection) {
@@ -552,6 +569,7 @@ class AvatarChatElement extends HTMLElement {
       } else {
         // Keyboard is closed - remove class
         widgetRoot.classList.remove('keyboard-visible');
+        widgetRoot.style.removeProperty('--keyboard-available-height');
         // Update baseline for next check
         initialViewportHeight = currentHeight;
         
