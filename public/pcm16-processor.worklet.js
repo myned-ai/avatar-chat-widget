@@ -24,9 +24,19 @@ class PCM16Processor extends AudioWorkletProcessor {
     // Listen for messages from main thread
     this.port.onmessage = (event) => {
       if (event.data.type === 'config') {
-        this.inputSampleRate = event.data.sampleRate;
+        // Update input sample rate
+        if (event.data.inputSampleRate) {
+          this.inputSampleRate = event.data.inputSampleRate;
+        }
+        
+        // Update target sample rate if provided by server
+        if (event.data.targetSampleRate) {
+          this.TARGET_SAMPLE_RATE = event.data.targetSampleRate;
+          this.TARGET_BUFFER_SIZE = Math.floor(this.TARGET_SAMPLE_RATE * 0.1); // 100ms buffer
+        }
+        
         this.resampleRatio = this.inputSampleRate / this.TARGET_SAMPLE_RATE;
-        console.log(`[Worklet] Configured: inputRate=${this.inputSampleRate}Hz, resampleRatio=${this.resampleRatio.toFixed(2)}`);
+        console.log(`[Worklet] Configured: inputRate=${this.inputSampleRate}Hz, targetRate=${this.TARGET_SAMPLE_RATE}Hz, resampleRatio=${this.resampleRatio.toFixed(2)}`);
       }
     };
   }

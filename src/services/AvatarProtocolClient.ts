@@ -9,7 +9,8 @@ import {
   TranscriptDeltaEvent,
   TranscriptDoneEvent,
   InterruptEvent,
-  AvatarStateEvent
+  AvatarStateEvent,
+  ConfigEvent
 } from '../types/protocol';
 
 const log = logger.scope('ProtocolClient');
@@ -43,6 +44,8 @@ export class AvatarProtocolClient extends EventEmitter {
   
   // Track finished/interrupted turns to filter stale deltas (Spec 5.4)
   private finalizedTurnIds: Set<string> = new Set();
+  private currentAvatarState: string = 'Idle';
+  private targetInputSampleRate: number = 24000; // Default for OpenAI, overridden by server config event
   
   // Optional user/session info
   private userId: string;
@@ -104,6 +107,7 @@ export class AvatarProtocolClient extends EventEmitter {
     this.socket.on('error', (err: Error) => this.emit('error', err));
 
     // Handle Protocol Events
+    this.socket.on('config', (msg: ConfigEvent) => this.handleConfig(msg));
     this.socket.on('audio_start', (msg: AudioStartEvent) => this.handleAudioStart(msg));
     this.socket.on('sync_frame', (msg: SyncFrameEvent) => this.handleSyncFrame(msg));
     this.socket.on('audio_end', (msg: AudioEndEvent) => this.handleAudioEnd(msg));
@@ -117,6 +121,19 @@ export class AvatarProtocolClient extends EventEmitter {
   // ------------------------------------------------------------------
   // In-bound Event Handlers (Server -> Client)
   // ------------------------------------------------------------------
+
+  /**
+   * Handle configuration from server
+   */
+  private handleConfig(event: ConfigEvent) {
+    log.info('Config received from server:', event);
+    if (event.audio?.inputSampleRate) {
+      this.targetInputSampleRate = event.audio.inputSampleRate;
+      log.info(`Target input sample rate set to: ${this.targetInputSampleRate}Hz`);
+    }
+    // Propagate config to ChatManager so it can update audio output components
+    this.emit('config', event);
+  }
 
   /**
    * Spec 3.1: Audio Start
@@ -228,13 +245,17 @@ export class AvatarProtocolClient extends EventEmitter {
   // ------------------------------------------------------------------
 
   public sendAudioStreamStart() {
-    log.info('Sending audio_stream_start', { userId: this.userId });
-    // Server only needs type and userId (Spec 4.1)
+    log.info('Sending audio_stream_start', { userId: this.userId, sampleRate: this.targetInputSampleRate });
     const msg = {
       type: 'audio_stream_start',
-      userId: this.userId
+      userId: this.userId,
+      sampleRate: this.targetInputSampleRate
     };
     this.socket.send(msg as OutgoingMessage);
+  }
+
+  public getTargetInputSampleRate(): number {
+    return this.targetInputSampleRate;
   }
 
   public sendAudioStreamEnd() {

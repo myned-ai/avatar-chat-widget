@@ -142,6 +142,14 @@ export class SyncPlayback implements Disposable {
   /**
    * Start a new playback session
    */
+  /**
+   * Set default sample rate (from server config, before any session starts)
+   */
+  setDefaultSampleRate(sampleRate: number): void {
+    this.sampleRate = sampleRate;
+    log.info(`SyncPlayback sample rate set to ${sampleRate}Hz`);
+  }
+
   startSession(sessionId: string, sampleRate?: number): void {
       log.debug(`[SyncPlayback][DEBUG] startSession called: sessionId=${sessionId}, sampleRate=${sampleRate}`);
       log.debug(`[SyncPlayback][DEBUG] Previous state: isPlaying=${this.isPlaying}, sessionId=${this.sessionId}`);

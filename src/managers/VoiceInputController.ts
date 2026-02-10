@@ -88,7 +88,10 @@ export class VoiceInputController implements Disposable {
     }
     
     try {
-      log.info('Starting recording (PCM16 24kHz)');
+      // Configure target sample rate from server before starting
+      const targetSampleRate = this.protocolClient.getTargetInputSampleRate();
+      log.info(`Starting recording with target sample rate: ${targetSampleRate}Hz`);
+      this.audioInput.setTargetSampleRate(targetSampleRate);
       
       // Start recording with PCM16 mode - this triggers permission prompt
       let chunkCount = 0;

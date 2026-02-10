@@ -72,6 +72,14 @@ export interface PongEvent extends ProtocolEvent {
   timestamp: number;
 }
 
+export interface ConfigEvent extends ProtocolEvent {
+  type: 'config';
+  audio?: {
+    inputSampleRate?: number;
+    outputSampleRate?: number;
+  };
+}
+
 // ------------------------------------------------------------------
 // Client-to-Server Events
 // ------------------------------------------------------------------

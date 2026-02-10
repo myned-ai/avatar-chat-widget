@@ -41,6 +41,14 @@ export class AudioOutput implements Disposable {
     return AudioContextManager.getContext();
   }
 
+  /**
+   * Set default sample rate (from server config, before any session starts)
+   */
+  setDefaultSampleRate(sampleRate: number): void {
+    this.sampleRate = sampleRate;
+    log.info(`Output sample rate set to ${sampleRate}Hz`);
+  }
+
   startSession(sessionId: string, sampleRate?: number): void {
     log.info('Audio output session started:', sessionId);
     this.sessionId = sessionId;
