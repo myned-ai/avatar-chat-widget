@@ -347,6 +347,15 @@ export class ChatManager implements Disposable {
       this.options.onConnectionChange?.(false);
     });
 
+    this.protocolClient.on('config', (event: { audio?: { inputSampleRate?: number; outputSampleRate?: number } }) => {
+      if (event.audio?.outputSampleRate) {
+        const rate = event.audio.outputSampleRate;
+        log.info(`Server configured output sample rate: ${rate}Hz`);
+        this.audioOutput.setDefaultSampleRate(rate);
+        this.syncPlayback.setDefaultSampleRate(rate);
+      }
+    });
+
     this.protocolClient.on('avatar_state', (event: { state: string }) => {
       log.info('Avatar state event:', event);
       const stateMap: Record<string, 'Idle' | 'Responding'> = {

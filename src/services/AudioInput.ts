@@ -26,8 +26,18 @@ export class AudioInput implements Disposable {
 
   // For PCM16 resampling (ScriptProcessor fallback only)
   private resampleBuffer: number[] = [];
-  private readonly TARGET_SAMPLE_RATE = 24000;
-  private readonly TARGET_BUFFER_SIZE = 2400; // 100ms at 24kHz
+  private targetSampleRate = 24000; // Default for OpenAI, can be overridden by server config
+  private targetBufferSize = 2400; // 100ms at 24kHz
+
+  /**
+   * Configure target sample rate for PCM16 output
+   * Must be called before startRecording()
+   */
+  setTargetSampleRate(sampleRate: number): void {
+    this.targetSampleRate = sampleRate;
+    this.targetBufferSize = Math.floor(sampleRate * 0.1); // 100ms buffer
+    log.info(`Target sample rate configured: ${sampleRate}Hz, buffer size: ${this.targetBufferSize}`);
+  }
 
   async requestPermission(): Promise<boolean> {
     try {
@@ -178,7 +188,8 @@ export class AudioInput implements Disposable {
     // Send configuration to worklet
     this.workletNode.port.postMessage({
       type: 'config',
-      sampleRate: inputSampleRate
+      inputSampleRate: inputSampleRate,
+      targetSampleRate: this.targetSampleRate
     });
 
     // Handle messages from worklet
@@ -210,8 +221,8 @@ export class AudioInput implements Disposable {
       throw new Error('AudioContext not initialized');
     }
 
-    const resampleRatio = inputSampleRate / this.TARGET_SAMPLE_RATE;
-    log.debug(`Using ScriptProcessorNode with resample ratio: ${resampleRatio.toFixed(2)}`);
+    const resampleRatio = inputSampleRate / this.targetSampleRate;
+    log.debug(`Using ScriptProcessorNode with resample ratio: ${resampleRatio.toFixed(2)}, target: ${this.targetSampleRate}Hz`);
 
     // Use ScriptProcessorNode (deprecated but widely supported)
     // Buffer size of 4096 gives us good latency while being efficient
@@ -253,12 +264,12 @@ export class AudioInput implements Disposable {
       }
 
       // When we have enough samples, send a chunk
-      while (this.resampleBuffer.length >= this.TARGET_BUFFER_SIZE) {
-        const chunk = this.resampleBuffer.splice(0, this.TARGET_BUFFER_SIZE);
+      while (this.resampleBuffer.length >= this.targetBufferSize) {
+        const chunk = this.resampleBuffer.splice(0, this.targetBufferSize);
 
         // Convert float32 to int16 PCM
-        const pcm16 = new Int16Array(this.TARGET_BUFFER_SIZE);
-        for (let j = 0; j < this.TARGET_BUFFER_SIZE; j++) {
+        const pcm16 = new Int16Array(this.targetBufferSize);
+        for (let j = 0; j < this.targetBufferSize; j++) {
           const s = Math.max(-1, Math.min(1, chunk[j]));
           pcm16[j] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }

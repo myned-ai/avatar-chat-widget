@@ -145,6 +145,14 @@ export interface TranscriptDoneMessage extends BaseMessage {
   finalAudioDurationMs: number;
 }
 
+export interface ConfigMessage extends BaseMessage {
+  type: 'config';
+  audio?: {
+    inputSampleRate?: number;
+    outputSampleRate?: number;
+  };
+}
+
 export type IncomingMessage = 
   | IncomingTextMessage 
   | AudioStartMessage 
@@ -157,7 +165,8 @@ export type IncomingMessage =
   | AvatarStateMessage
   | InterruptMessage
   | TranscriptDeltaMessage
-  | TranscriptDoneMessage;
+  | TranscriptDoneMessage
+  | ConfigMessage;
 
 // Blendshape data structure
 export interface BlendshapeFrame {
