@@ -4,6 +4,17 @@
 
 [![npm version](https://img.shields.io/npm/v/@myned-ai/avatar-chat-widget.svg)](https://www.npmjs.com/package/@myned-ai/avatar-chat-widget)
 
+> **Next-Gen Engagement:** Replace static chatbots with a living, breathing 3D avatar that talks to your visitors.
+
+## ✨ Features
+
+- **Hyper-Realistic 3D Avatars**: Powered by **3D Gaussian Splatting** for cinematic visual fidelity directly in the browser.
+- **Precise Lip-Sync**: Animation tightly synchronized with audio for a lifelike experience.
+- **Natural Voice Interaction**: Full duplex voice chat with echo cancellation and noise suppression.
+- **Zero-Conflict styles**: Fully encapsulated using **Shadow DOM** – never breaks your site's layout.
+- **Smart Loading**: Lazy-loaded 3D engine ensures your initial page load remains instant.
+- **100% Customizable**: Change suggestions, colors, and behaviors via simple config.
+
 ---
 
 ## Quick Start
@@ -41,7 +52,6 @@ import '@myned-ai/avatar-chat-widget/style.css';
 const chat = AvatarChat.init({
   container: '#avatar-chat',
   serverUrl: 'wss://your-backend-server.com/ws',
-  theme: 'dark',
   onReady: () => console.log('Widget ready!'),
   onMessage: (msg) => console.log('Message:', msg)
 });
@@ -62,15 +72,19 @@ chat.destroy();  // Cleanup
 | `container` | `string \| HTMLElement` | **required** | CSS selector or DOM element |
 | `serverUrl` | `string` | **required** | WebSocket server URL (ws:// or wss://) |
 | `position` | `string` | `'bottom-right'` | `bottom-right`, `bottom-left`, `top-right`, `top-left`, `inline` |
+| `primaryColor` | `string` | `'#4B4ACF'` | Main brand color (hex, rgb, etc) |
+| `suggestions` | `string[]` | `['...']` | Array of quick-reply suggestions |
 | `startCollapsed` | `boolean` | `true` | Start minimized as bubble |
+| `tooltipText` | `string` | `'Hi! 👋...'` | Text shown on bubble hover |
 | `width` | `number` | `380` | Widget width (200-2000px) |
 | `height` | `number` | `550` | Widget height (300-2000px) |
 | `enableVoice` | `boolean` | `true` | Enable voice chat |
 | `enableText` | `boolean` | `true` | Enable text chat |
-| `logLevel` | `string` | `'error'` | `none`, `error`, `warn`, `info`, `debug` |
-| `customStyles` | `string` | `undefined` | Custom CSS to inject into Shadow DOM |
-| `authEnabled` | `boolean` | `true` | Enable HMAC authentication (disable for dev) |
+| `authEnabled` | `boolean` | `false` | Enable HMAC authentication |
 | `avatarUrl` | `string` | auto-detected | URL to avatar ZIP file |
+| `assetsBaseUrl` | `string` | auto-detected | Base URL for worklet/assets |
+| `customStyles` | `string` | `undefined` | Custom CSS to inject into Shadow DOM |
+| `logLevel` | `string` | `'error'` | `none`, `error`, `warn`, `info`, `debug` |
 
 ### Callbacks
 
@@ -85,9 +99,22 @@ chat.destroy();  // Cleanup
 
 ## Customization
 
-### Changing Colors
+### Quick Branding
 
-The widget uses CSS variables that you can override with the `customStyles` option:
+For simple color matching, use the `primaryColor` option:
+
+```typescript
+AvatarChat.init({
+  container: '#avatar-chat',
+  serverUrl: 'wss://...',
+  primaryColor: '#FF5722', // Match your brand
+  secondaryColor: '#37474F'
+});
+```
+
+### Advanced Styling
+
+For deeper customization, use the `customStyles` option to inject CSS directly into the widget's Shadow DOM:
 
 ```typescript
 AvatarChat.init({
@@ -226,23 +253,6 @@ docker-compose up
 
 Server runs on `ws://localhost:8765` by default.
 
----
-
-## Browser Requirements
-
-**Supported browsers:**
-- Chrome/Edge 90+
-- Firefox 89+
-- Safari 15.2+
-
-**Production deployment:**
-
-For optimal performance, your server must send these headers to enable SharedArrayBuffer:
-
-```
-Cross-Origin-Embedder-Policy: require-corp
-Cross-Origin-Opener-Policy: same-origin
-```
 
 ---
 
