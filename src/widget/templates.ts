@@ -9,6 +9,27 @@
  * - Input Layer (fixed 90px, absolutely positioned)
  */
 
+/**
+ * Get the URL for avatar.gif, using the same CDN detection logic
+ * as getDefaultAvatarUrl() in widget.ts uses for nyx.zip.
+ */
+function getAvatarGifUrl(): string {
+  const scripts = document.getElementsByTagName('script');
+  for (let i = 0; i < scripts.length; i++) {
+    const src = scripts[i].src;
+    if (src.includes('jsdelivr.net') && src.includes('avatar-chat-widget')) {
+      const baseUrl = src.substring(0, src.lastIndexOf('/'));
+      return `${baseUrl}/avatar-chat-widget/public/asset/avatar.gif`;
+    }
+    if (src.includes('unpkg.com') && src.includes('avatar-chat-widget')) {
+      const baseUrl = src.substring(0, src.lastIndexOf('/'));
+      return `${baseUrl}/avatar-chat-widget/public/asset/avatar.gif`;
+    }
+  }
+  // Fallback for npm usage or local development
+  return './asset/avatar.gif';
+}
+
 export const WIDGET_TEMPLATE = `
 <div class="widget-root" data-drawer-state="avatar-focus">
   <!-- Header (fixed height, always visible) -->
@@ -119,7 +140,10 @@ export const WIDGET_TEMPLATE = `
 </div>
 `;
 
-export const BUBBLE_TEMPLATE = `
+export function getBubbleTemplate(): string {
+  const avatarGifUrl = getAvatarGifUrl();
+
+  return `
 <div class="bubble-container">
   <div class="bubble-tooltip-wrapper">
      <div class="bubble-tooltip" id="bubbleTooltip">
@@ -129,7 +153,7 @@ export const BUBBLE_TEMPLATE = `
   </div>
   <div class="chat-bubble" id="chatBubble" role="button" aria-label="Open chat" tabindex="0">
     <div class="bubble-avatar-preview">
-      <img src="./asset/avatar.gif" class="avatar-face-img" alt="Nyx Avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+      <img src="${avatarGifUrl}" class="avatar-face-img" alt="Nyx Avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
       <div class="avatar-fallback-icon" style="display:none;">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -141,3 +165,4 @@ export const BUBBLE_TEMPLATE = `
   </div>
 </div>
 `;
+}

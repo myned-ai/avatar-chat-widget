@@ -37,7 +37,7 @@ const UI_DELAY = {
   /** Delay to allow ChatManager to process before UI cleanup */
   INPUT_CLEANUP: 50,
 } as const;
-import { WIDGET_TEMPLATE, BUBBLE_TEMPLATE } from './widget/templates';
+import { WIDGET_TEMPLATE, getBubbleTemplate } from './widget/templates';
 
 const log = logger.scope('Widget');
 
@@ -232,7 +232,7 @@ class AvatarChatElement extends HTMLElement {
     if (style) this.shadow.appendChild(style);
 
     const container = document.createElement('div');
-    container.innerHTML = BUBBLE_TEMPLATE;
+    container.innerHTML = getBubbleTemplate();
     const wrapper = container.firstElementChild;
     
     if (!wrapper) {
