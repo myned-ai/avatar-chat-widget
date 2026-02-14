@@ -129,9 +129,10 @@ class AvatarChatElement extends HTMLElement {
     };
     logger.setLevel(logLevels[this.config.logLevel || 'error']);
     
-    // Update global config for services - only URL is needed for widget
+    // Update global config for services
     setConfig({
       websocket: { url: this.config.serverUrl },
+      auth: { enabled: this.config.authEnabled ?? false },
     } as Partial<AppConfig>);
   }
 
