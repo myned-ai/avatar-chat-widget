@@ -118,7 +118,7 @@ class AvatarChatElement extends HTMLElement {
    */
   configure(config: AvatarChatConfig): void {
     this.config = { ...DEFAULT_CONFIG, ...config } as AvatarChatConfig;
-    
+
     // Set log level
     const logLevels: Record<string, typeof LogLevel[keyof typeof LogLevel]> = {
       'none': LogLevel.None,
@@ -128,7 +128,7 @@ class AvatarChatElement extends HTMLElement {
       'debug': LogLevel.Debug,
     };
     logger.setLevel(logLevels[this.config.logLevel || 'error']);
-    
+
     // Update global config for services
     setConfig({
       websocket: { url: this.config.serverUrl },
@@ -190,7 +190,7 @@ class AvatarChatElement extends HTMLElement {
     const container = document.createElement('div');
     container.innerHTML = WIDGET_TEMPLATE;
     const root = container.firstElementChild;
-    
+
     if (!root) {
       log.error('Failed to create widget root element from template');
       return;
@@ -203,7 +203,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Setup UI event listeners
     this.setupUIEvents();
-    
+
     // Setup mobile keyboard handling
     this.setupMobileKeyboardHandling();
 
@@ -235,12 +235,12 @@ class AvatarChatElement extends HTMLElement {
     const container = document.createElement('div');
     container.innerHTML = getBubbleTemplate();
     const wrapper = container.firstElementChild;
-    
+
     if (!wrapper) {
       log.error('Failed to create bubble wrapper from template');
       return;
     }
-    
+
     // Attach events to actual bubble element
     const bubble = wrapper.querySelector('#chatBubble');
     if (bubble) {
@@ -254,12 +254,12 @@ class AvatarChatElement extends HTMLElement {
     const closeBtn = wrapper.querySelector('#tooltipClose');
     const tooltip = wrapper.querySelector('#bubbleTooltip');
     const tooltipTextEl = wrapper.querySelector('#tooltipText');
-    
+
     // Set tooltip text from config
     if (tooltipTextEl && this.config.tooltipText) {
       tooltipTextEl.textContent = this.config.tooltipText;
     }
-    
+
     if (closeBtn && tooltip) {
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // prevent bubble open
@@ -333,15 +333,15 @@ class AvatarChatElement extends HTMLElement {
       // Fallback: return as-is (works for local dev)
       return url;
     }
-    
+
     // No avatarUrl provided, use default with detected or configured base
     const baseUrl = this.config.assetsBaseUrl || detectAssetsBaseUrl();
     const defaultPath = '/asset/nyx.zip';
-    
+
     if (baseUrl) {
       return `${baseUrl.replace(/\/$/, '')}${defaultPath}`;
     }
-    
+
     // Final fallback for local development
     return defaultPath;
   }
@@ -380,7 +380,7 @@ class AvatarChatElement extends HTMLElement {
         onMessage: (msg) => {
           this.config.onMessage?.(msg);
           // If we receive a message (e.g. welcome message or response), mark has messages
-          this.markHasMessages(); 
+          this.markHasMessages();
         },
         onError: (err) => {
           this.config.onError?.(err);
@@ -396,7 +396,7 @@ class AvatarChatElement extends HTMLElement {
               avatarSubtitles.textContent = '';
             }
           }
-          
+
           // Assistant messages: Simple subtitle display (no karaoke)
           if (role === 'assistant' && avatarSubtitles) {
             if (!text) {
@@ -405,7 +405,7 @@ class AvatarChatElement extends HTMLElement {
               avatarSubtitles.textContent = '';
               return;
             }
-            
+
             avatarSubtitles.classList.add('visible');
             avatarSubtitles.classList.remove('user-speaking');
             avatarSubtitles.textContent = text;
@@ -434,7 +434,7 @@ class AvatarChatElement extends HTMLElement {
     // Input Interaction Logic (Voice Priority)
     const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
     const inputControls = this.shadow.querySelector('.chat-input-controls');
-    
+
     if (chatInput && inputControls) {
       chatInput.addEventListener('input', () => {
         if (chatInput.value.trim().length > 0) {
@@ -461,7 +461,7 @@ class AvatarChatElement extends HTMLElement {
     const quickReplies = this.shadow.getElementById('quickReplies');
     const avatarSuggestions = this.shadow.getElementById('avatarSuggestions');
     const micBtn = this.shadow.getElementById('micBtn');
-    
+
     // Populate suggestion chips from config (both in chat and avatar sections)
     if (this.config.suggestions && this.config.suggestions.length > 0) {
       // Sort suggestions by length so similar-length ones appear on the same line
@@ -469,7 +469,7 @@ class AvatarChatElement extends HTMLElement {
       const chipsHtml = sortedSuggestions
         .map(text => `<button class="suggestion-chip">${this.escapeHtml(text)}</button>`)
         .join('');
-      
+
       if (quickReplies) {
         quickReplies.innerHTML = chipsHtml;
       }
@@ -477,7 +477,7 @@ class AvatarChatElement extends HTMLElement {
         avatarSuggestions.innerHTML = chipsHtml;
       }
     }
-    
+
     if (chatInput) {
       const hideSuggestions = () => {
         quickReplies?.classList.add('hidden');
@@ -515,11 +515,11 @@ class AvatarChatElement extends HTMLElement {
         if (e.key === 'Enter') {
           this.markHasMessages(); // Mark has messages immediately
           hideSuggestions();
-           // Force UI cleanup after ChatManager handles send
+          // Force UI cleanup after ChatManager handles send
           setTimeout(() => {
-             if (chatInput.value.trim() === '') {
-                 inputControls?.classList.remove('has-text');
-             }
+            if (chatInput.value.trim() === '') {
+              inputControls?.classList.remove('has-text');
+            }
           }, UI_DELAY.INPUT_CLEANUP);
         }
       });
@@ -537,29 +537,29 @@ class AvatarChatElement extends HTMLElement {
     }
 
     const widgetRoot = this.shadow.querySelector('.widget-root') as HTMLElement;
-    
+
     if (!widgetRoot) {
       return;
     }
-    
+
     let initialViewportHeight = window.visualViewport.height;
-    
+
     const handleViewportChange = () => {
       const viewport = window.visualViewport!;
       const currentHeight = viewport.height;
-      
+
       // Check if keyboard opened (significant height reduction)
       const keyboardHeight = initialViewportHeight - currentHeight;
-      
+
       if (keyboardHeight > 150) {
         // Keyboard is open - add class to trigger CSS resize
         widgetRoot.classList.add('keyboard-visible');
-        
+
         // Set actual available height as CSS variable for dynamic sizing
         const inputHeight = 90; // matches --input-height
         const availableHeight = currentHeight - inputHeight;
         widgetRoot.style.setProperty('--keyboard-available-height', `${availableHeight}px`);
-        
+
         // Force avatar container to recalculate position (fixes WebGL canvas offset)
         const avatarSection = this.shadow.querySelector('.avatar-section') as HTMLElement;
         if (avatarSection) {
@@ -573,7 +573,7 @@ class AvatarChatElement extends HTMLElement {
         widgetRoot.style.removeProperty('--keyboard-available-height');
         // Update baseline for next check
         initialViewportHeight = currentHeight;
-        
+
         // Reset transform
         const avatarSection = this.shadow.querySelector('.avatar-section') as HTMLElement;
         if (avatarSection) {
@@ -581,10 +581,10 @@ class AvatarChatElement extends HTMLElement {
         }
       }
     };
-    
+
     window.visualViewport.addEventListener('resize', handleViewportChange);
     window.visualViewport.addEventListener('scroll', handleViewportChange);
-    
+
     // Store handler for cleanup
     this.visualViewportHandler = handleViewportChange;
   }
@@ -603,7 +603,7 @@ class AvatarChatElement extends HTMLElement {
    */
   private generateColorOverrides(): string {
     const overrides: string[] = [];
-    
+
     if (this.config.primaryColor) {
       const primary = this.config.primaryColor;
       // Generate a darker shade for gradient (darken by ~20%)
@@ -611,13 +611,13 @@ class AvatarChatElement extends HTMLElement {
       overrides.push(`--primary-color: ${primary};`);
       overrides.push(`--primary-gradient: linear-gradient(135deg, ${primary} 0%, ${darkerShade} 100%);`);
     }
-    
+
     if (this.config.secondaryColor) {
       overrides.push(`--secondary-color: ${this.config.secondaryColor};`);
     }
-    
+
     if (overrides.length === 0) return '';
-    
+
     return `:host { ${overrides.join(' ')} }`;
   }
 
@@ -627,17 +627,17 @@ class AvatarChatElement extends HTMLElement {
   private darkenColor(hex: string, percent: number): string {
     // Remove # if present
     hex = hex.replace(/^#/, '');
-    
+
     // Parse RGB
     let r = parseInt(hex.substring(0, 2), 16);
     let g = parseInt(hex.substring(2, 4), 16);
     let b = parseInt(hex.substring(4, 6), 16);
-    
+
     // Darken
     r = Math.max(0, Math.floor(r * (1 - percent)));
     g = Math.max(0, Math.floor(g * (1 - percent)));
     b = Math.max(0, Math.floor(b * (1 - percent)));
-    
+
     // Convert back to hex
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   }
@@ -677,7 +677,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Setup view mode selector
     this.setupViewModeSelector();
-    
+
     // Setup expand button
     this.setupExpandButton();
   }
@@ -720,14 +720,14 @@ class AvatarChatElement extends HTMLElement {
       if (this.drawerController) {
         const currentState = this.drawerController.getState();
         const newState: DrawerState = currentState === 'avatar-focus' ? 'text-focus' : 'avatar-focus';
-        
+
         // Remove expanded state when switching to avatar-focus
         if (newState === 'avatar-focus') {
           widgetRoot.classList.remove('expanded');
           expandBtn.setAttribute('aria-label', 'Expand chat');
           expandBtn.setAttribute('title', 'Expand');
         }
-        
+
         // Update view mode button tooltip
         if (newState === 'text-focus') {
           viewModeBtn.setAttribute('title', 'Avatar View');
@@ -736,7 +736,7 @@ class AvatarChatElement extends HTMLElement {
           viewModeBtn.setAttribute('title', 'Chat View');
           viewModeBtn.setAttribute('aria-label', 'Switch to Chat View');
         }
-        
+
         this.drawerController.setState(newState);
       }
     });
@@ -831,6 +831,22 @@ class AvatarChatElement extends HTMLElement {
     if (this.chatManager && text.trim()) {
       this.chatManager.sendText(text);
     }
+  }
+
+  /**
+   * Expose triggerAction for client-side Actions debugging
+   * Dispatches a custom nyxAction event as if the server triggered it
+   */
+  triggerAction(function_name: string, args: Record<string, any> = {}): void {
+    const eventDetail = {
+      type: 'trigger_action',
+      function_name,
+      arguments: args,
+    };
+
+    log.info(`🛠️ Debug Action Triggered manually: ${function_name}`, args);
+    const customEvent = new CustomEvent('nyxAction', { detail: eventDetail });
+    window.dispatchEvent(customEvent);
   }
 
   /**
@@ -1125,6 +1141,7 @@ export const AvatarChat = {
       isMounted: () => widget.isMounted(),
       isConnected: () => widget.isServerConnected(),
       reconnect: () => widget.reconnect(),
+      triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
     };
   },
 
@@ -1143,7 +1160,7 @@ export const AvatarChat = {
    */
   getInstance(): AvatarChatInstance | null {
     if (!this._instance) return null;
-    
+
     const widget = this._instance;
     return {
       sendMessage: (text) => widget.sendMessage(text),
@@ -1159,6 +1176,7 @@ export const AvatarChat = {
       isMounted: () => widget.isMounted(),
       isConnected: () => widget.isServerConnected(),
       reconnect: () => widget.reconnect(),
+      triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
     };
   },
 };

@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="x-ua-compatible" content="ie=edge">
   <title>Nyx Web Chat Demo</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
   <style>
     * {
       margin: 0;
@@ -19,9 +21,39 @@
       background: #204959;
       min-height: 100vh;
     }
+
+    .debug-actions {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 9999;
+      background: white;
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .debug-actions button {
+      padding: 8px 16px;
+      background: #4B4ACF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .debug-actions button:hover {
+      background: #3a39a8;
+    }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
+
 <body>
+  <!-- <div class="debug-actions">
+    <button id="confettiBtn">Test Confetti Action</button>
+  </div> -->
   <script type="module">
     import AvatarChat from './src/widget.ts';
 
@@ -43,6 +75,28 @@
       primaryColor: '#204959',      // User bubbles, suggestions, accents
       secondaryColor: '#204959',
     });
+
+    // Listen for AI Actions
+    window.addEventListener('nyxAction', (e) => {
+      const { function_name, arguments: args } = e.detail;
+      console.log('Main Page received nyxAction:', function_name, args);
+
+      if (function_name === 'trigger_confetti') {
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+      }
+
+
+    });
+
+    // Setup debug button
+    // document.getElementById('confettiBtn').addEventListener('click', () => {
+    //   widget.triggerAction('trigger_confetti', {});
+    // });
   </script>
 </body>
+
 </html>

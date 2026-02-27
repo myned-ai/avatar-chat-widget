@@ -3,13 +3,14 @@
 
 import { AvatarProtocolClient } from '../services/AvatarProtocolClient';
 import { SocketService } from '../services/SocketService';
-import type { 
-  AudioStartEvent, 
-  SyncFrameEvent, 
+import type {
+  AudioStartEvent,
+  SyncFrameEvent,
   AudioEndEvent,
-  TranscriptDeltaEvent, 
-  TranscriptDoneEvent, 
-  InterruptEvent
+  TranscriptDeltaEvent,
+  TranscriptDoneEvent,
+  InterruptEvent,
+  TriggerActionEvent
 } from '../types/protocol';
 import { AudioInput } from '../services/AudioInput';
 import { AudioOutput } from '../services/AudioOutput';
@@ -57,7 +58,7 @@ export class ChatManager implements Disposable {
   private blendshapeBuffer: BlendshapeBuffer;
   private syncPlayback: SyncPlayback;
   private avatar: IAvatarController;
-  
+
   // Extracted modules
   private subtitleController: SubtitleController;
   private transcriptManager: TranscriptManager;
@@ -75,7 +76,7 @@ export class ChatManager implements Disposable {
   private wasInterrupted: boolean = false;
   private interruptCutoffMs: number | null = null; // Cutoff offset when interrupted
   private scheduledStopTimeout: number | null = null; // Timeout for delayed stopAllPlayback after interrupt
-  
+
   // Track rendered user messages to prevent duplicates from transcript_done echoes
   private renderedUserMessageIds: Set<string> = new Set();
   // Track the last user turn ID for deduplication
@@ -93,7 +94,7 @@ export class ChatManager implements Disposable {
   // Animation state
   private animationFrameId: number | null = null;
   private autoScrollObserver: MutationObserver | null = null;
-  
+
   // Transcript Queue for synced display (words are queued with startOffset, displayed when audio reaches that time)
   private transcriptQueue: Array<{
     text: string;
@@ -102,16 +103,16 @@ export class ChatManager implements Disposable {
     previousItemId?: string;
     role: 'user' | 'assistant';
   }> = [];
-  
+
   // Track displayed words with their offsets for interrupt truncation
   private displayedWords: Array<{ text: string; offset: number }> = [];
-  
+
   // Counter for words that have been displayed but not yet marked as spoken in subtitles
   private wordsSpokenCount: number = 0;
-  
+
   // Base offset for the current turn (first startOffset received, used to normalize offsets per turn)
   private turnBaseOffset: number | null = null;
-  
+
   // Buffer for transcript_delta events that arrive before audio_start
   // These are processed once audio_start is received to prevent orphaned bubbles
   private earlyTranscriptBuffer: TranscriptDeltaEvent[] = [];
@@ -127,7 +128,7 @@ export class ChatManager implements Disposable {
     this.avatar = avatar;
     this.options = options;
     this.userId = this.generateUserId();
-    
+
     // Initialize core services
     this.socketService = new SocketService();
     this.protocolClient = new AvatarProtocolClient(this.socketService);
@@ -135,14 +136,14 @@ export class ChatManager implements Disposable {
     this.audioOutput = new AudioOutput();
     this.blendshapeBuffer = new BlendshapeBuffer();
     this.syncPlayback = new SyncPlayback();
-    
+
     // Get UI elements with proper null checks
     const root = options.shadowRoot || document;
-    
+
     const chatMessagesEl = options.chatMessages || root.getElementById('chatMessages');
     const chatInputEl = options.chatInput || root.getElementById('chatInput');
     const micBtnEl = options.micBtn || root.getElementById('micBtn');
-    
+
     if (!chatMessagesEl) {
       throw new Error('ChatManager: chatMessages element not found');
     }
@@ -152,7 +153,7 @@ export class ChatManager implements Disposable {
     if (!micBtnEl) {
       throw new Error('ChatManager: micBtn element not found');
     }
-    
+
     this.chatMessages = chatMessagesEl;
     this.chatInput = chatInputEl as HTMLInputElement;
     this.micBtn = micBtnEl as HTMLButtonElement;
@@ -191,7 +192,7 @@ export class ChatManager implements Disposable {
 
   async initialize(): Promise<void> {
     FeatureDetection.logCapabilities();
-    
+
     try {
       await this.protocolClient.connect();
       log.info('WebSocket connected');
@@ -206,7 +207,7 @@ export class ChatManager implements Disposable {
 
   sendText(text: string): void {
     if (!text.trim()) return;
-    
+
     this.options.onSubtitleUpdate?.(text, 'user');
     this.transcriptManager.addMessage(text, 'user');
 
@@ -234,16 +235,16 @@ export class ChatManager implements Disposable {
 
   resetOnMinimize(): void {
     this.stopAllPlayback();
-    
+
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
-    
+
     // Disconnect websocket to save resources/bandwidth when minimized
     this.protocolClient.disconnect();
     log.info('Disconnected on minimize');
-    
+
     this.avatar.disableLiveBlendshapes();
     this.avatar.setChatState('Idle');
     this.subtitleController.clear();
@@ -304,7 +305,7 @@ export class ChatManager implements Disposable {
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
       }
     });
-    
+
     this.autoScrollObserver.observe(this.chatMessages, {
       childList: true,
       subtree: true,
@@ -323,7 +324,7 @@ export class ChatManager implements Disposable {
 
     this.chatInput.addEventListener('keypress', this.keypressHandler);
     this.micBtn.addEventListener('click', this.micClickHandler);
-    
+
     // Standalone mode handlers
     if (!this.options.shadowRoot) {
       const root = document;
@@ -392,6 +393,10 @@ export class ChatManager implements Disposable {
       this.handleInterrupt(event);
     });
 
+    this.protocolClient.on('trigger_action', (event: TriggerActionEvent) => {
+      this.handleTriggerAction(event);
+    });
+
     this.protocolClient.on('error', (err) => log.error('Protocol Error:', err));
   }
 
@@ -399,14 +404,20 @@ export class ChatManager implements Disposable {
   // Protocol Handlers
   // ============================================================================
 
+  private handleTriggerAction(event: TriggerActionEvent): void {
+    log.info(`🎯 Action Triggered: ${event.function_name}`, event.arguments);
+    const customEvent = new CustomEvent('nyxAction', { detail: event });
+    window.dispatchEvent(customEvent);
+  }
+
   private handleAudioStart(event: AudioStartEvent): void {
     this.setTyping(false);
-    
+
     // Check if sync_frames arrived before audio_start
     if (this.syncFramesBeforeStart > 0) {
       log.warn(`⚠️ Received ${this.syncFramesBeforeStart} sync_frames BEFORE audio_start!`);
     }
-    
+
     this.currentTurnId = event.turnId;
     this.currentSessionId = event.sessionId;
     this.turnStartTime = Date.now();
@@ -414,16 +425,16 @@ export class ChatManager implements Disposable {
     this.syncFramesBeforeStart = 0;
     this.wasInterrupted = false;
     this.interruptCutoffMs = null; // Reset interrupt cutoff for new turn
-    
+
     // Cancel any pending scheduled stopAllPlayback from previous interrupted turn
     if (this.scheduledStopTimeout !== null) {
       clearTimeout(this.scheduledStopTimeout);
       this.scheduledStopTimeout = null;
       log.debug('Cancelled pending scheduled stopAllPlayback from previous turn');
     }
-    
+
     log.info(`📢 TURN START [assistant] turnId=${event.turnId} sessionId=${event.sessionId}`);
-    
+
     // Reset transcript queue, subtitle, and transcript state for new assistant turn
     log.debug(`[AUDIO] Resetting queue (had ${this.transcriptQueue.length} items)`);
     this.transcriptQueue = [];
@@ -434,15 +445,15 @@ export class ChatManager implements Disposable {
     this.subtitleController.reset();
     log.debug('[AUDIO] Calling transcriptManager.clear()');
     this.transcriptManager.clear(); // Ensures transcript buffer is fully reset for new turn
-    
+
     this.syncPlayback.startSession(event.sessionId, event.sampleRate);
     this.audioOutput.startSession(event.sessionId, event.sampleRate);
     this.blendshapeBuffer.startSession(event.sessionId);
-    
+
     this.useSyncPlayback = false;
     this.avatar.enableLiveBlendshapes();
     this.avatar.setChatState('Responding');
-    
+
     // Process any transcript_deltas that arrived before audio_start
     if (this.earlyTranscriptBuffer.length > 0) {
       log.debug(`[AUDIO] Processing ${this.earlyTranscriptBuffer.length} buffered early transcript_deltas`);
@@ -461,7 +472,7 @@ export class ChatManager implements Disposable {
         log.warn(`⚠️ sync_frame received BEFORE audio_start!`);
       }
     }
-    
+
     // Handle session ID mismatch (server may use different ID sources for audio_start vs sync_frame)
     if (event.sessionId && event.sessionId !== this.currentSessionId) {
       if (this.currentSessionId) {
@@ -476,7 +487,7 @@ export class ChatManager implements Disposable {
     }
 
     this.useSyncPlayback = true;
-    
+
     const audioData = this.decodeBase64ToArrayBuffer(event.audio);
     const weights = Array.isArray(event.weights) ? {} : event.weights;
 
@@ -487,16 +498,16 @@ export class ChatManager implements Disposable {
       frameIndex: event.frameIndex,
       sessionId: event.sessionId
     };
-    
+
     this.syncPlayback.addSyncFrame(frame);
   }
 
   private handleAudioEnd(event: AudioEndEvent): void {
     log.info('Audio end received - marking stream complete');
-    
+
     // Reset for next turn
     this.audioStartReceived = false;
-    
+
     if (this.useSyncPlayback) {
       this.syncPlayback.endSession(event.sessionId);
     } else {
@@ -507,13 +518,13 @@ export class ChatManager implements Disposable {
 
   private handleTranscriptDelta(event: TranscriptDeltaEvent): void {
     const { role, text, itemId, previousItemId, startOffset, turnId } = event;
-    
+
     // Ignore transcript deltas from stale turns
     if (turnId && this.currentTurnId && turnId !== this.currentTurnId) {
       log.debug(`Ignoring stale transcript_delta for turn ${turnId} (current: ${this.currentTurnId})`);
       return;
     }
-    
+
     // Buffer assistant transcript_deltas that arrive BEFORE audio_start
     // This prevents orphaned bubbles when clear() is called on audio_start
     if (role === 'assistant' && !this.audioStartReceived) {
@@ -521,13 +532,13 @@ export class ChatManager implements Disposable {
       this.earlyTranscriptBuffer.push(event);
       return;
     }
-    
+
     log.debug(`[TRANSCRIPT] Delta received: role=${role}, text="${text}", startOffset=${startOffset}ms`);
-    
+
     if (role === 'assistant') {
       // Add word to subtitle controller (for chunk-based display)
       this.subtitleController.addWord(text);
-      
+
       if (typeof startOffset === 'number') {
         // Normalize offset relative to turn start (server sends cumulative offsets)
         // First word of the turn sets the base offset; all subsequent offsets are relative to it
@@ -537,7 +548,7 @@ export class ChatManager implements Disposable {
         }
         const normalizedOffset = startOffset - this.turnBaseOffset;
         log.debug(`[TRANSCRIPT] Normalized offset: ${startOffset}ms - ${this.turnBaseOffset}ms = ${normalizedOffset}ms`);
-        
+
         // Queue for synced display with audio playback time
         // Words with 0 or negative offset show immediately
         if (normalizedOffset <= 0) {
@@ -567,20 +578,20 @@ export class ChatManager implements Disposable {
 
   private handleTranscriptDone(event: TranscriptDoneEvent): void {
     log.debug(`Transcript done [${event.role}]: ${event.text} turnId=${event.turnId}`);
-    
+
     if (event.role === 'assistant') {
       // Ignore transcript_done from stale turns (e.g., from previous interrupted turn)
       if (event.turnId && this.currentTurnId && event.turnId !== this.currentTurnId) {
         log.debug(`Ignoring stale transcript_done for turn ${event.turnId} (current: ${this.currentTurnId})`);
         return;
       }
-      
+
       // If this turn was interrupted, the bubble was already finalized with spoken text only
       if (this.wasInterrupted) {
         log.debug(`Ignoring transcript_done for interrupted turn`);
         return;
       }
-      
+
       if (event.interrupted) {
         // Server sent truncated text for interrupted turn
         this.transcriptManager.replaceAssistantTurnText(event.text);
@@ -614,18 +625,18 @@ export class ChatManager implements Disposable {
       log.debug(`Ignoring interrupt: turnId=${event.turnId} (current: ${this.currentTurnId})`);
       return;
     }
-    
+
     const playbackState = this.syncPlayback.getState();
     const msPlayed = playbackState.audioPlaybackTime * 1000;
     const turnDurationMs = Date.now() - this.turnStartTime;
     const cutoffMs = event.offsetMs;
-    
+
     log.info(`⛔ INTERRUPT turnId=${event.turnId} | cutoffOffset=${cutoffMs}ms | audioPlayed=${msPlayed.toFixed(0)}ms | turnDuration=${turnDurationMs}ms`);
-    
+
     // Set interrupt flag and cutoff IMMEDIATELY to stop queue processing beyond this point
     this.wasInterrupted = true;
     this.interruptCutoffMs = cutoffMs;
-    
+
     if (msPlayed >= cutoffMs) {
       log.info(`  → Immediate stop (already past cutoff)`);
       this.stopAllPlayback();
@@ -639,7 +650,7 @@ export class ChatManager implements Disposable {
       }, remainingMs);
     }
   }
-  
+
   /**
    * Truncate the assistant transcript to only include words spoken before the cutoff offset.
    * 
@@ -652,12 +663,12 @@ export class ChatManager implements Disposable {
     // This accounts for average word duration in speech (~200-400ms per word)
     const WORD_DURATION_TOLERANCE_MS = 300;
     const effectiveCutoff = cutoffMs + WORD_DURATION_TOLERANCE_MS;
-    
+
     // Filter displayed words to only those that started before the effective cutoff
     const spokenWords = this.displayedWords.filter(w => w.offset < effectiveCutoff);
-    
+
     log.info(`  → Truncating transcript: ${this.displayedWords.length} words → ${spokenWords.length} words (cutoff: ${cutoffMs}ms + ${WORD_DURATION_TOLERANCE_MS}ms tolerance)`);
-    
+
     if (spokenWords.length === 0) {
       // Nothing was spoken - clear the assistant bubble entirely
       this.transcriptManager.replaceAssistantTurnText('');
@@ -667,7 +678,7 @@ export class ChatManager implements Disposable {
       this.transcriptManager.replaceAssistantTurnText(truncatedText);
     }
     // If all words were spoken, leave the text as-is
-    
+
     // Update displayedWords to only contain spoken words
     this.displayedWords = spokenWords;
   }
@@ -682,9 +693,9 @@ export class ChatManager implements Disposable {
 
     // Mark that we rendered a user text message locally (to skip server echo)
     this.pendingUserTextMessage = true;
-    
+
     log.info(`📤 TURN START [user] | Text: "${text}"`);
-    
+
     this.chatInput.value = '';
     this.avatar.setChatState('Idle');
     this.transcriptManager.addMessage(text, 'user');
@@ -696,18 +707,18 @@ export class ChatManager implements Disposable {
     this.syncPlayback.stop();
     this.audioOutput.stop();
     this.blendshapeBuffer.clear();
-    
+
     // Clear pending transcript items - they weren't spoken
     this.transcriptQueue = [];
-    
+
     // Clear early transcript buffer - prevents stale deltas from being processed
     this.earlyTranscriptBuffer = [];
-    
+
     // Truncate transcript to only show words that were actually spoken before interrupt
     if (this.interruptCutoffMs !== null) {
       this.truncateTranscriptAtOffset(this.interruptCutoffMs);
     }
-    
+
     this.transcriptManager.finalizeAssistantTurn();
     this.subtitleController.clear();
 
@@ -721,11 +732,11 @@ export class ChatManager implements Disposable {
     const sync = () => {
       // Process any queued transcript items (sync text with audio playback time)
       this.processTranscriptQueue();
-      
+
       if (!this.useSyncPlayback) {
         const result = this.blendshapeBuffer.getFrame();
         this.avatar.updateBlendshapes(result.weights);
-        
+
         if (result.status === 'SPEAKING' && this.avatar.getChatState() !== 'Responding') {
           this.avatar.setChatState('Responding');
         } else if (result.status === 'LISTENING' && result.endOfSpeech) {
@@ -736,7 +747,7 @@ export class ChatManager implements Disposable {
       // When playback ends and blendshapes are drained, do cleanup (but keep loop running)
       if (this.playbackEnded && this.blendshapeBuffer.isEmpty()) {
         log.info('Playback ended and buffer is empty. Cleaning up and setting state to Idle.');
-        
+
         // Flush remaining transcript queue (only if not interrupted)
         if (!this.wasInterrupted) {
           while (this.transcriptQueue.length > 0) {
@@ -749,16 +760,16 @@ export class ChatManager implements Disposable {
         } else {
           this.transcriptQueue = [];
         }
-        
+
         // Show any remaining subtitle text, finalize transcript, then clear subtitles
         this.subtitleController.showRemaining();
         this.transcriptManager.finalizeAssistantTurn();
-        
+
         // Clear subtitles after a brief delay so user can read the final text
         setTimeout(() => {
           this.subtitleController.clear();
         }, 1500);
-        
+
         this.avatar.setChatState('Idle');
         this.resetPlaybackState();
       }
@@ -783,7 +794,7 @@ export class ChatManager implements Disposable {
    */
   private processTranscriptQueue(): void {
     if (this.transcriptQueue.length === 0) return;
-    
+
     // If interrupted, don't process any more words beyond the cutoff
     if (this.wasInterrupted && this.interruptCutoffMs !== null) {
       // Clear queue items beyond cutoff - they won't be spoken
@@ -792,14 +803,14 @@ export class ChatManager implements Disposable {
     }
 
     const playbackState = this.syncPlayback.getState();
-    
+
     // DEBUG: Log playback state periodically (every 500ms worth of change)
     const playbackTimeMs = playbackState.audioPlaybackTime * 1000;
-    
+
     // SUBTITLE TIMING: No lead - exact sync with audio timestamps
     // The server provides accurate startOffset values, display at exact time
     const adjustedPlaybackTimeMs = playbackTimeMs;
-    
+
     // CRITICAL: Don't process until playback has actually started
     // This prevents the buffer flush bug where all words would appear at once
     if (!playbackState.isPlaying) {
@@ -809,7 +820,7 @@ export class ChatManager implements Disposable {
       }
       return;
     }
-    
+
     // DEBUG: Log queue processing
     const nextItem = this.transcriptQueue[0];
     if (nextItem) {
@@ -825,7 +836,7 @@ export class ChatManager implements Disposable {
       if (isDue) {
         this.transcriptQueue.shift();
         processedCount++;
-        
+
         // DEBUG: Log each word as it's dequeued with timing info
         log.debug(`[QUEUE] Dequeuing "${item.text}" - offset=${item.startOffset}ms, playback=${playbackTimeMs.toFixed(0)}ms, delta=${(playbackTimeMs - item.startOffset).toFixed(0)}ms`);
 
@@ -842,12 +853,12 @@ export class ChatManager implements Disposable {
         break;
       }
     }
-    
+
     // DEBUG: Log if we processed any words
     if (processedCount > 0) {
       log.debug(`[QUEUE] Dequeued ${processedCount} words at playbackTime=${playbackTimeMs.toFixed(0)}ms`);
     }
-    
+
     // SUBTITLE SYNC: Mark words as spoken for each word that was dequeued
     while (this.wordsSpokenCount > 0) {
       this.subtitleController.markWordSpoken();
@@ -857,7 +868,7 @@ export class ChatManager implements Disposable {
 
   private setTyping(typing: boolean): void {
     if (!this.typingIndicator) return;
-    
+
     if (typing) {
       this.typingStartTime = Date.now();
       this.typingIndicator.classList.add('visible');
@@ -865,7 +876,7 @@ export class ChatManager implements Disposable {
     } else {
       const elapsed = Date.now() - this.typingStartTime;
       const remaining = CHAT_TIMING.MIN_TYPING_DISPLAY_MS - elapsed;
-      
+
       if (remaining > 0) {
         setTimeout(() => this.typingIndicator?.classList.remove('visible'), remaining);
       } else {
@@ -884,7 +895,7 @@ export class ChatManager implements Disposable {
     const root = this.options.shadowRoot || document;
     const chatContainer = root.querySelector('.chat-container') as HTMLElement;
     const chatBubble = root.getElementById?.('chatBubble');
-    
+
     if (chatContainer?.classList.contains('collapsed')) {
       chatContainer.classList.remove('collapsed');
       if (chatBubble) chatBubble.style.display = 'none';
@@ -898,7 +909,7 @@ export class ChatManager implements Disposable {
     const root = this.options.shadowRoot || document;
     const chatContainer = root.querySelector('.chat-container') as HTMLElement;
     const chatBubble = root.getElementById?.('chatBubble');
-    
+
     chatContainer?.classList.remove('collapsed');
     if (chatBubble) chatBubble.style.display = 'none';
   }
@@ -906,7 +917,7 @@ export class ChatManager implements Disposable {
   private generateUserId(): string {
     const stored = localStorage.getItem('avatar-chat-user-id');
     if (stored) return stored;
-    
+
     const id = `user_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     localStorage.setItem('avatar-chat-user-id', id);
     return id;

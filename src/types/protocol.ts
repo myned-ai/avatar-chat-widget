@@ -62,6 +62,12 @@ export interface InterruptEvent extends ProtocolEvent {
   timestamp: number;
 }
 
+export interface TriggerActionEvent extends ProtocolEvent {
+  type: 'trigger_action';
+  function_name: string;
+  arguments: Record<string, any>;
+}
+
 export interface AvatarStateEvent extends ProtocolEvent {
   type: 'avatar_state';
   state: 'Listening' | 'Responding' | 'Processing' | 'Idle';
@@ -108,9 +114,9 @@ export interface PingMessage {
 }
 
 // Union type for all outgoing messages
-export type OutgoingMessage = 
-  | AudioStreamStartMessage 
-  | AudioMessage 
-  | TextMessage 
-  | InterruptMessage 
+export type OutgoingMessage =
+  | AudioStreamStartMessage
+  | AudioMessage
+  | TextMessage
+  | InterruptMessage
   | PingMessage;

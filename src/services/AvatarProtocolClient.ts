@@ -10,7 +10,8 @@ import {
   TranscriptDoneEvent,
   InterruptEvent,
   AvatarStateEvent,
-  ConfigEvent
+  ConfigEvent,
+  TriggerActionEvent
 } from '../types/protocol';
 
 const log = logger.scope('ProtocolClient');
@@ -27,6 +28,7 @@ type _ProtocolClientEvents = {
   'connected': () => void;
   'disconnected': () => void;
   'error': (error: Error) => void;
+  'trigger_action': (event: TriggerActionEvent) => void;
 };
 
 /**
@@ -36,17 +38,17 @@ type _ProtocolClientEvents = {
  */
 export class AvatarProtocolClient extends EventEmitter {
   private socket: SocketService;
-  
+
   // Global State (Spec 5.1)
   private currentTurnId: string | null = null;
   private currentSessionId: string | null = null;
   private isConnected = false;
-  
+
   // Track finished/interrupted turns to filter stale deltas (Spec 5.4)
   private finalizedTurnIds: Set<string> = new Set();
   private currentAvatarState: string = 'Idle';
   private targetInputSampleRate: number = 24000; // Default for OpenAI, overridden by server config event
-  
+
   // Optional user/session info
   private userId: string;
 
@@ -115,6 +117,7 @@ export class AvatarProtocolClient extends EventEmitter {
     this.socket.on('transcript_done', (msg: TranscriptDoneEvent) => this.handleTranscriptDone(msg));
     this.socket.on('interrupt', (msg: InterruptEvent) => this.handleInterrupt(msg));
     this.socket.on('avatar_state', (msg: AvatarStateEvent) => this.emit('avatar_state', msg));
+    this.socket.on('trigger_action', (msg: TriggerActionEvent) => this.emit('trigger_action', msg));
     this.socket.on('pong', (msg: { type: 'pong'; timestamp: number }) => log.debug('Pong received', msg));
   }
 
@@ -147,7 +150,7 @@ export class AvatarProtocolClient extends EventEmitter {
     }
 
     log.info(`Audio Start [Turn: ${event.turnId}]`);
-    
+
     // Update State (Spec 5.2)
     this.currentTurnId = event.turnId;
     this.currentSessionId = event.sessionId;
@@ -167,12 +170,12 @@ export class AvatarProtocolClient extends EventEmitter {
     // Spec Verification: "Correlates to audio_start.turnId"
     // Note: Implicit session start logic might be needed if audio_start dropped,
     // but strictly following spec, we should track turnId.
-    
+
     // Check for "Implicit Start" (Robustness)
     if (event.turnId && event.turnId !== this.currentTurnId) {
-        log.info(`Implicit turn switch detected via sync_frame: ${event.turnId}`);
-        this.currentTurnId = event.turnId;
-        if (event.sessionId) this.currentSessionId = event.sessionId;
+      log.info(`Implicit turn switch detected via sync_frame: ${event.turnId}`);
+      this.currentTurnId = event.turnId;
+      if (event.sessionId) this.currentSessionId = event.sessionId;
     }
 
     this.emit('sync_frame', event);
@@ -185,10 +188,10 @@ export class AvatarProtocolClient extends EventEmitter {
   private handleAudioEnd(event: AudioEndEvent) {
     // Spec 5.2: "Do NOT stop playback immediately! Just mark stream as closed."
     if (event.turnId === this.currentTurnId) {
-       log.info(`Audio End [Turn: ${event.turnId}]`);
-       this.emit('audio_end', event);
+      log.info(`Audio End [Turn: ${event.turnId}]`);
+      this.emit('audio_end', event);
     } else {
-       log.debug(`Received audio_end for stale turn: ${event.turnId}`);
+      log.debug(`Received audio_end for stale turn: ${event.turnId}`);
     }
   }
 
@@ -198,10 +201,10 @@ export class AvatarProtocolClient extends EventEmitter {
   private handleTranscriptDelta(event: TranscriptDeltaEvent) {
     // Spec 5.4: "Ignore Future Deltas" if interrupted/finalized
     if (this.finalizedTurnIds.has(event.turnId)) {
-        log.debug(`Ignoring stale delta for finished turn: ${event.turnId}`);
-        return;
+      log.debug(`Ignoring stale delta for finished turn: ${event.turnId}`);
+      return;
     }
-    
+
     // We pass it to the UI
     this.emit('transcript_delta', event);
   }
@@ -213,7 +216,7 @@ export class AvatarProtocolClient extends EventEmitter {
   private handleTranscriptDone(event: TranscriptDoneEvent) {
     // Mark as finalized
     if (event.turnId) {
-        this.finalizedTurnIds.add(event.turnId);
+      this.finalizedTurnIds.add(event.turnId);
     }
     this.emit('transcript_done', event);
   }
@@ -232,7 +235,7 @@ export class AvatarProtocolClient extends EventEmitter {
     }
 
     log.info(`Interrupt received [Turn: ${turnId}, Offset: ${offsetMs}ms]`);
-    
+
     // Mark as finalized/interrupted to block future deltas
     this.finalizedTurnIds.add(turnId);
 
@@ -259,12 +262,12 @@ export class AvatarProtocolClient extends EventEmitter {
   }
 
   public sendAudioStreamEnd() {
-     log.info('Sending audio_stream_end');
-     // Server only needs type (Spec 4.4)
-     const msg = {
-        type: 'audio_stream_end'
-     };
-     this.socket.send(msg as OutgoingMessage);
+    log.info('Sending audio_stream_end');
+    // Server only needs type (Spec 4.4)
+    const msg = {
+      type: 'audio_stream_end'
+    };
+    this.socket.send(msg as OutgoingMessage);
   }
 
   public sendAudioData(data: ArrayBuffer) {
@@ -276,7 +279,7 @@ export class AvatarProtocolClient extends EventEmitter {
       binary += String.fromCharCode(bytes[i]);
     }
     const base64Data = btoa(binary);
-    
+
     const msg = {
       type: 'audio',
       data: base64Data
