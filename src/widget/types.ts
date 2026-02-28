@@ -94,6 +94,8 @@ export interface AvatarChatInstance {
   isConnected(): boolean;
   /** Manually reconnect to the server (resets reconnection counter) */
   reconnect(): Promise<void>;
+  /** Trigger a client-side action manually for debugging */
+  triggerAction(function_name: string, args?: Record<string, any>): void;
 }
 
 /**

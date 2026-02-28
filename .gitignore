@@ -38,3 +38,4 @@ venv/
 *.temp
 *.txt
 docs/
+devtunnel.exe
