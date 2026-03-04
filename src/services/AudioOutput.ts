@@ -30,8 +30,8 @@ export class AudioOutput implements Disposable {
     // Start with 100ms, allow 50-500ms range
     this.adaptiveBuffer = new AdaptiveBuffer(100, 50, 500);
 
-    // Initialize shared AudioContext (handles resume listener internally)
-    AudioContextManager.getContext(this.sampleRate);
+    // Set sample rate for lazy AudioContext creation (created on first user gesture)
+    AudioContextManager.setSampleRate(this.sampleRate);
   }
 
   /**
@@ -46,6 +46,7 @@ export class AudioOutput implements Disposable {
    */
   setDefaultSampleRate(sampleRate: number): void {
     this.sampleRate = sampleRate;
+    AudioContextManager.setSampleRate(sampleRate);
     log.info(`Output sample rate set to ${sampleRate}Hz`);
   }
 
@@ -61,7 +62,7 @@ export class AudioOutput implements Disposable {
     this.nextPlayTime = 0;
     // Ensure AudioContext is running after an interrupt or page minimize
     AudioContextManager.resume().catch(() => {
-      // Ignore resume errors - will retry on user interaction
+      log.warn('AudioContext resume failed in startSession — will retry on next user gesture');
     });
   }
 

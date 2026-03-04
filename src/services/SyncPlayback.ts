@@ -111,8 +111,8 @@ export class SyncPlayback implements Disposable {
     this.visibilityHandler = this.handleVisibilityChange.bind(this);
     document.addEventListener('visibilitychange', this.visibilityHandler);
     
-    // Initialize shared AudioContext (handles resume listener internally)
-    AudioContextManager.getContext(this.sampleRate);
+    // Set sample rate for lazy AudioContext creation (created on first user gesture)
+    AudioContextManager.setSampleRate(this.sampleRate);
   }
 
   /**
@@ -147,6 +147,7 @@ export class SyncPlayback implements Disposable {
    */
   setDefaultSampleRate(sampleRate: number): void {
     this.sampleRate = sampleRate;
+    AudioContextManager.setSampleRate(sampleRate);
     log.info(`SyncPlayback sample rate set to ${sampleRate}Hz`);
   }
 
@@ -165,7 +166,7 @@ export class SyncPlayback implements Disposable {
 
     // Resume AudioContext if it was suspended (e.g., after minimize)
     AudioContextManager.resume().catch(() => {
-      // Ignore resume errors - will be retried on user interaction
+      log.warn('AudioContext resume failed in startSession — will retry on next user gesture');
     });
 
     // Log sample rate vs AudioContext sample rate for diagnostics

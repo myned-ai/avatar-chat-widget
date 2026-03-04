@@ -8,7 +8,7 @@ const log = logger.scope('AudioContextManager');
 
 /**
  * AudioContextManager - Singleton for shared AudioContext
- * 
+ *
  * Why this matters:
  * - Browsers limit AudioContexts (Chrome: 6, Firefox: 8)
  * - Each AudioContext consumes significant resources
@@ -22,9 +22,9 @@ class AudioContextManagerImpl {
   private _resumePromise: Promise<void> | null = null;
   private _suspendPromise: Promise<void> | null = null;
   private _sampleRate: number = 24000;
-  
+
   // Store listener references for cleanup (prevents memory leaks)
-  private _interactionHandler: (() => Promise<void>) | null = null;
+  private _interactionHandler: (() => void) | null = null;
   private _listenerEvents: string[] = [];
 
   private constructor() {
@@ -39,7 +39,16 @@ class AudioContextManagerImpl {
   }
 
   /**
-   * Get or create the shared AudioContext
+   * Set the sample rate for when the AudioContext is eventually created.
+   * Call this early (e.g., from server config) before any audio session starts.
+   */
+  setSampleRate(sampleRate: number): void {
+    this._sampleRate = sampleRate;
+  }
+
+  /**
+   * Get the shared AudioContext. Creates lazily if needed.
+   * Prefer ensureAudioReady() from user-gesture handlers to guarantee iOS unlock.
    * @param sampleRate Optional sample rate (only used on first creation)
    */
   getContext(sampleRate?: number): AudioContext {
@@ -51,6 +60,32 @@ class AudioContextManagerImpl {
       this._sampleRate = sampleRate;
     }
 
+    return this.createContext();
+  }
+
+  /**
+   * Single idempotent entry point: create (if needed) + resume AudioContext.
+   * Call this synchronously from any user-gesture handler (pointerdown, touchend,
+   * click, keydown) to guarantee iOS audio unlock.
+   */
+  ensureAudioReady(): void {
+    // Create if it doesn't exist yet (lazy)
+    if (!this._context) {
+      this.createContext();
+    }
+
+    // Resume synchronously within the gesture call stack
+    if (this._context && this._context.state !== 'running') {
+      this.resume().catch((error) => {
+        log.warn('ensureAudioReady resume failed (will retry on next gesture):', error);
+      });
+    }
+  }
+
+  /**
+   * Internal: create the AudioContext and wire up fallback document listeners.
+   */
+  private createContext(): AudioContext {
     try {
       const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) {
@@ -58,17 +93,20 @@ class AudioContextManagerImpl {
       }
       this._context = new AudioContextClass({
         sampleRate: this._sampleRate,
-        latencyHint: 'interactive', // Optimize for real-time
+        latencyHint: 'interactive',
       });
 
       log.info(`AudioContext created: sampleRate=${this._context.sampleRate}, state=${this._context.state}`);
 
-      // Setup single resume listener for entire app
+      // Fallback: document-level listeners for cases where widget handlers don't fire
       this.setupResumeListener();
 
-      // Handle context state changes
       this._context.onstatechange = () => {
         log.debug(`AudioContext state changed: ${this._context?.state}`);
+        // Remove listeners once context is running (successful unlock)
+        if (this._context?.state === 'running') {
+          this.removeResumeListeners();
+        }
       };
 
     } catch (error) {
@@ -80,33 +118,38 @@ class AudioContextManagerImpl {
   }
 
   /**
-   * Setup a single click listener to resume AudioContext (browser policy)
-   * This replaces multiple listeners scattered across services
+   * Fallback document-level listeners for audio unlock.
+   * These are a safety net — primary unlock happens via ensureAudioReady()
+   * called from widget gesture handlers.
    */
   private setupResumeListener(): void {
     if (this._isResumeListenerAdded) {
       return;
     }
 
-    // Use multiple event types for better mobile support
-    this._listenerEvents = ['click', 'touchstart', 'keydown'];
-    
-    // Store handler reference for cleanup
-    this._interactionHandler = async () => {
-      this.removeResumeListeners();
-      await this.resume();
+    // pointerdown fires before click; touchend is most reliable on iOS Safari
+    this._listenerEvents = ['pointerdown', 'touchend', 'keydown'];
+
+    this._interactionHandler = () => {
+      // Don't remove listeners here — only remove once state is 'running'
+      // (handled by onstatechange above)
+      if (this._context && this._context.state !== 'running') {
+        this._context.resume().catch(() => {
+          // Will retry on next gesture — listeners stay attached
+        });
+      }
     };
 
     this._listenerEvents.forEach(event => {
-      document.addEventListener(event, this._interactionHandler!, { once: true, passive: true });
+      document.addEventListener(event, this._interactionHandler!, { passive: true });
     });
 
     this._isResumeListenerAdded = true;
-    log.debug('Audio resume listeners added');
+    log.debug('Audio resume fallback listeners added');
   }
 
   /**
-   * Remove resume listeners (called after first interaction or on cleanup)
+   * Remove resume listeners (only after context is running, or on cleanup)
    */
   private removeResumeListeners(): void {
     if (this._interactionHandler) {
@@ -115,6 +158,8 @@ class AudioContextManagerImpl {
       });
       this._interactionHandler = null;
       this._listenerEvents = [];
+      this._isResumeListenerAdded = false;
+      log.debug('Audio resume fallback listeners removed');
     }
   }
 
@@ -143,6 +188,7 @@ class AudioContextManagerImpl {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Checked above
         await this._context!.resume();
         log.info('AudioContext resumed successfully');
+        this.removeResumeListeners();
       } catch (error) {
         log.error('Failed to resume AudioContext:', error);
         errorBoundary.handleError(error as Error, 'audio-context-manager');
@@ -235,8 +281,8 @@ class AudioContextManagerImpl {
   createBuffer(numberOfChannels: number, length: number, sampleRate?: number): AudioBuffer | null {
     if (!this._context) return null;
     return this._context.createBuffer(
-      numberOfChannels, 
-      length, 
+      numberOfChannels,
+      length,
       sampleRate ?? this._context.sampleRate
     );
   }
@@ -254,7 +300,7 @@ class AudioContextManagerImpl {
   async close(): Promise<void> {
     // Remove any remaining document listeners to prevent memory leaks
     this.removeResumeListeners();
-    
+
     if (this._context) {
       try {
         await this._context.close();

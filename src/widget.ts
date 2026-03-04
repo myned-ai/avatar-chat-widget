@@ -26,6 +26,7 @@
 import { setConfig, type AppConfig } from './config';
 import { LazyAvatar } from './avatar/LazyAvatar';
 import { ChatManager } from './managers/ChatManager';
+import { AudioContextManager } from './services/AudioContextManager';
 import { logger, LogLevel } from './utils/Logger';
 import { WIDGET_STYLES } from './widget/styles';
 import { DrawerController, type DrawerState } from './widget/DrawerController';
@@ -445,6 +446,7 @@ class AvatarChatElement extends HTMLElement {
       });
       // Toggle input-focused class for mobile styles
       chatInput.addEventListener('focus', () => {
+        AudioContextManager.ensureAudioReady();
         const root = this.shadow.querySelector('.widget-root');
         if (root) root.classList.add('input-focused');
       });
@@ -488,6 +490,7 @@ class AvatarChatElement extends HTMLElement {
       const handleChipClick = (e: Event) => {
         const target = e.target as HTMLElement;
         if (target.classList.contains('suggestion-chip')) {
+          AudioContextManager.ensureAudioReady();
           this.markHasMessages(); // Mark has messages immediately
           hideSuggestions();
           const text = target.textContent;
@@ -506,6 +509,7 @@ class AvatarChatElement extends HTMLElement {
 
       // 2. Hide on Voice Start (mic click)
       micBtn?.addEventListener('click', () => {
+        AudioContextManager.ensureAudioReady();
         this.markHasMessages();
         hideSuggestions();
       });
@@ -513,6 +517,7 @@ class AvatarChatElement extends HTMLElement {
       // 3. Hide on Enter Key and cleanup
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+          AudioContextManager.ensureAudioReady();
           this.markHasMessages(); // Mark has messages immediately
           hideSuggestions();
           // Force UI cleanup after ChatManager handles send
@@ -786,6 +791,9 @@ class AvatarChatElement extends HTMLElement {
    */
   async expand(): Promise<void> {
     if (!this._isCollapsed) return;
+
+    // Unlock audio on iOS — bubble click is the first reliable user gesture
+    AudioContextManager.ensureAudioReady();
 
     this._isCollapsed = false;
     this.classList.remove('collapsed');
