@@ -68,18 +68,29 @@ class AudioContextManagerImpl {
    * Call this synchronously from any user-gesture handler (pointerdown, touchend,
    * click, keydown) to guarantee iOS audio unlock.
    */
-  ensureAudioReady(): void {
+  ensureAudioReady(source?: string): void {
+    const tag = source ? `[${source}]` : '';
+
     // Create if it doesn't exist yet (lazy)
     if (!this._context) {
       this.createContext();
     }
 
-    // Resume synchronously within the gesture call stack
-    if (this._context && this._context.state !== 'running') {
-      this.resume().catch((error) => {
-        log.warn('ensureAudioReady resume failed (will retry on next gesture):', error);
-      });
-    }
+    const ctx = this._context;
+    if (!ctx) return;
+
+    if (ctx.state === 'running') return;
+
+    // Call native .resume() DIRECTLY in the gesture call stack.
+    // Do NOT route through this.resume() — its async wrapper adds indirection
+    // that can break the gesture-to-resume association on iOS Safari.
+    log.debug(`${tag} Attempting AudioContext unlock, current state=${ctx.state}`);
+    ctx.resume().then(() => {
+      log.info(`${tag} AudioContext unlocked via ensureAudioReady`);
+      this.removeResumeListeners();
+    }).catch((error) => {
+      log.warn(`${tag} ensureAudioReady resume failed (will retry on next gesture):`, error);
+    });
   }
 
   /**
@@ -98,8 +109,11 @@ class AudioContextManagerImpl {
 
       log.info(`AudioContext created: sampleRate=${this._context.sampleRate}, state=${this._context.state}`);
 
-      // Fallback: document-level listeners for cases where widget handlers don't fire
-      this.setupResumeListener();
+      // Only setup fallback listeners if context starts suspended (iOS).
+      // Desktop browsers typically start in 'running' — no need for extra listeners.
+      if (this._context.state !== 'running') {
+        this.setupResumeListener();
+      }
 
       this._context.onstatechange = () => {
         log.debug(`AudioContext state changed: ${this._context?.state}`);

@@ -428,9 +428,23 @@ class AvatarChatElement extends HTMLElement {
    * Setup UI event listeners
    */
   private setupUIEvents(): void {
+    // iOS audio unlock: any interaction inside widget should attempt to unlock audio.
+    // Uses capture phase so this runs even if inner handlers call stopPropagation().
+    // On desktop (AudioContext starts 'running'), ensureAudioReady() is a no-op.
+    const unlockAudio = (e: Event) => {
+      AudioContextManager.ensureAudioReady(`widget:${e.type}`);
+    };
+    this.shadow.addEventListener('pointerdown', unlockAudio, { capture: true, passive: true });
+    this.shadow.addEventListener('touchend', unlockAudio, { capture: true, passive: true });
+    this.shadow.addEventListener('click', unlockAudio, { capture: true, passive: true });
+    this.shadow.addEventListener('focusin', unlockAudio, { capture: true });
+
     // Minimize button
     const minimizeBtn = this.shadow.getElementById('minimizeBtn');
-    minimizeBtn?.addEventListener('click', () => this.collapse());
+    minimizeBtn?.addEventListener('click', () => {
+      AudioContextManager.ensureAudioReady();
+      this.collapse();
+    });
 
     // Input Interaction Logic (Voice Priority)
     const chatInput = this.shadow.getElementById('chatInput') as HTMLInputElement;
@@ -700,6 +714,7 @@ class AvatarChatElement extends HTMLElement {
     }
 
     expandBtn.addEventListener('click', () => {
+      AudioContextManager.ensureAudioReady();
       const isExpanded = widgetRoot.classList.toggle('expanded');
       expandBtn.setAttribute('aria-label', isExpanded ? 'Collapse chat' : 'Expand chat');
       expandBtn.setAttribute('title', isExpanded ? 'Collapse' : 'Expand');
@@ -721,6 +736,7 @@ class AvatarChatElement extends HTMLElement {
 
     // Toggle between avatar-focus and text-focus on click
     viewModeBtn.addEventListener('click', (e) => {
+      AudioContextManager.ensureAudioReady();
       e.stopPropagation();
       if (this.drawerController) {
         const currentState = this.drawerController.getState();
@@ -793,7 +809,7 @@ class AvatarChatElement extends HTMLElement {
     if (!this._isCollapsed) return;
 
     // Unlock audio on iOS — bubble click is the first reliable user gesture
-    AudioContextManager.ensureAudioReady();
+    AudioContextManager.ensureAudioReady('widget:expand');
 
     this._isCollapsed = false;
     this.classList.remove('collapsed');
