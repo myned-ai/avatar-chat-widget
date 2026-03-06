@@ -39,7 +39,7 @@ export const WIDGET_TEMPLATE = `
     <div class="header-info">
       <div class="header-title">
         <span class="status-dot"></span>
-        <h3>Nyx Assistant</h3>
+        <h3>Nikola Tesla</h3>
       </div>
     </div>
     <div class="header-buttons">
