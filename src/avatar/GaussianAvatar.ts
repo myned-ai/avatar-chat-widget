@@ -2,6 +2,7 @@ import * as GaussianSplats3D from "@myned-ai/gsplat-flame-avatar-renderer"
 import { createNeutralWeights } from '../constants/arkit';
 import { logger } from '../utils/Logger';
 import type { Disposable, ChatState } from '../types/common';
+import type { CameraConfig } from '../widget/types';
 
 const log = logger.scope('GaussianAvatar');
 
@@ -51,10 +52,12 @@ export class GaussianAvatar implements Disposable {
   private currentBlinkPattern: number[] = BLINK_PATTERNS[0];
   private blinkIntensity = 1.0;
   private lastBlinkFrameTime = 0; // For frame timing at 30fps
-  
-  constructor(container: HTMLDivElement, assetsPath: string) {
+  private _cameraConfig?: CameraConfig;
+
+  constructor(container: HTMLDivElement, assetsPath: string, cameraConfig?: CameraConfig) {
     this._avatarDivEle = container;
     this._assetsPath = assetsPath;
+    this._cameraConfig = cameraConfig;
     // Initialize neutral blendshapes using centralized constants
     this.neutralBlendshapes = createNeutralWeights();
     this._init();
@@ -88,10 +91,61 @@ export class GaussianAvatar implements Disposable {
       },
     );
     
+    // Apply camera config if provided
+    if (this._cameraConfig) {
+      this.applyCamera(this._cameraConfig);
+    }
+
     this.startTime = performance.now() / 1000;
-    // Initial state is 'Idle' - ChatManager will set appropriate states based on conversation
-    // State flow: Idle → Hello (user interaction) → Responding (AI speaks) → Idle
     log.info('Avatar ready, initial state:', this.curState);
+  }
+
+  /**
+   * Apply camera configuration to the renderer
+   */
+  private applyCamera(config: CameraConfig): void {
+    const camera = this._renderer.getCamera();
+    if (!camera) {
+      log.warn('Camera not available');
+      return;
+    }
+
+    if (config.position) {
+      camera.position.set(config.position[0], config.position[1], config.position[2]);
+    }
+
+    if (config.lookAt) {
+      // Update the viewer's stored lookAt to persist across frames
+      const viewer = this._renderer.viewer as any;
+      if (viewer.initialCameraLookAt) {
+        viewer.initialCameraLookAt.set(config.lookAt[0], config.lookAt[1], config.lookAt[2]);
+      }
+      camera.lookAt(config.lookAt[0], config.lookAt[1], config.lookAt[2]);
+    }
+
+    if (config.fov !== undefined && 'fov' in camera) {
+      (camera as any).fov = config.fov;
+      (camera as any).updateProjectionMatrix();
+    }
+
+    // Sync orbit controls if they exist
+    const controls = (this._renderer.viewer as any).controls;
+    if (controls && controls.target && config.lookAt) {
+      controls.target.set(config.lookAt[0], config.lookAt[1], config.lookAt[2]);
+      controls.update();
+    }
+
+    log.info('Camera config applied:', config);
+  }
+
+  /**
+   * Update camera framing at runtime
+   */
+  public setCamera(config: CameraConfig): void {
+    this._cameraConfig = config;
+    if (this._renderer) {
+      this.applyCamera(config);
+    }
   }
 
   /**

@@ -9,6 +9,7 @@
 
 import type { ChatState, Disposable } from '../types/common';
 import type { IAvatarController } from '../types/avatar';
+import type { CameraConfig } from '../widget/types';
 import { logger } from '../utils/Logger';
 
 const log = logger.scope('LazyAvatar');
@@ -16,8 +17,9 @@ const log = logger.scope('LazyAvatar');
 /**
  * Type for GaussianAvatar constructor (ensures type safety on dynamic import)
  */
-type GaussianAvatarConstructor = new (container: HTMLDivElement, assetsPath: string) => IAvatarController & {
+type GaussianAvatarConstructor = new (container: HTMLDivElement, assetsPath: string, cameraConfig?: CameraConfig) => IAvatarController & {
   start?: () => Promise<void> | void;
+  setCamera?: (config: CameraConfig) => void;
 };
 
 export interface LazyAvatarOptions {
@@ -29,6 +31,8 @@ export interface LazyAvatarOptions {
   onError?: (error: Error) => void;
   /** Show loading indicator */
   onLoadingStart?: () => void;
+  /** Camera framing configuration */
+  camera?: CameraConfig;
 }
 
 /**
@@ -37,6 +41,7 @@ export interface LazyAvatarOptions {
  */
 type AvatarControllerWithStart = IAvatarController & {
   start?: () => Promise<void> | void;
+  setCamera?: (config: CameraConfig) => void;
 };
 
 export class LazyAvatar implements IAvatarController, Disposable {
@@ -54,6 +59,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
   private _pendingBlendshapes: Record<string, number> | null = null;
   private _liveBlendshapesEnabled = false;
   private _loadFailed = false;
+  private _cameraConfig?: CameraConfig;
   
   constructor(
     container: HTMLDivElement, 
@@ -63,6 +69,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
     this._container = container;
     this._assetsPath = assetsPath;
     this._options = { preload: true, ...options };
+    this._cameraConfig = options.camera;
     
     // Show placeholder
     this._showPlaceholder();
@@ -195,7 +202,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._removePlaceholder();
       
       // Create the actual avatar (now properly typed)
-      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath);
+      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath, this._cameraConfig);
       
       // Start rendering if the avatar has a start method
       if (this._avatar.start) {
@@ -297,7 +304,14 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._avatar.resume();
     }
   }
-  
+
+  public setCamera(config: CameraConfig): void {
+    this._cameraConfig = config;
+    if (this._avatar?.setCamera) {
+      this._avatar.setCamera(config);
+    }
+  }
+
   public dispose(): void {
     this._removePlaceholder();
     // Also remove error state if present

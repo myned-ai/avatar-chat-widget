@@ -45,7 +45,7 @@ const log = logger.scope('Widget');
 // ============================================================================
 // Re-export types from widget/types.ts
 // ============================================================================
-export type { AvatarChatConfig, AvatarChatInstance } from './widget/types';
+export type { AvatarChatConfig, AvatarChatInstance, CameraConfig } from './widget/types';
 
 // ============================================================================
 // Default Configuration
@@ -301,6 +301,7 @@ class AvatarChatElement extends HTMLElement {
             log.error('Avatar load error:', err);
             this.config.onError?.(err);
           },
+          camera: this.config.camera,
         }
       );
       this.avatar.start();
@@ -691,6 +692,15 @@ class AvatarChatElement extends HTMLElement {
       onStateChange: (state: DrawerState) => {
         log.debug('Drawer state changed:', state);
         this.updateViewModeUI(state);
+        // Switch camera framing based on view mode
+        if (this.avatar) {
+          const cameraConfig = state === 'text-focus'
+            ? this.config.smallCamera
+            : this.config.camera;
+          if (cameraConfig) {
+            this.avatar.setCamera(cameraConfig);
+          }
+        }
       },
     });
 
@@ -854,6 +864,15 @@ class AvatarChatElement extends HTMLElement {
   sendMessage(text: string): void {
     if (this.chatManager && text.trim()) {
       this.chatManager.sendText(text);
+    }
+  }
+
+  /**
+   * Update camera framing at runtime
+   */
+  setCamera(config: import('./widget/types').CameraConfig): void {
+    if (this.avatar) {
+      this.avatar.setCamera(config);
     }
   }
 
@@ -1166,6 +1185,7 @@ export const AvatarChat = {
       isConnected: () => widget.isServerConnected(),
       reconnect: () => widget.reconnect(),
       triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
+      setCamera: (config) => widget.setCamera(config),
     };
   },
 
@@ -1201,6 +1221,7 @@ export const AvatarChat = {
       isConnected: () => widget.isServerConnected(),
       reconnect: () => widget.reconnect(),
       triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
+      setCamera: (config) => widget.setCamera(config),
     };
   },
 };

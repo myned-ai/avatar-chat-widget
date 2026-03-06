@@ -3,6 +3,18 @@
  */
 
 /**
+ * Camera framing configuration for the 3D avatar
+ */
+export interface CameraConfig {
+  /** Camera position [x, y, z] — default: [0, 1.8, 1] */
+  position?: [number, number, number];
+  /** Camera lookAt target [x, y, z] — default: [0, 1.6, 0] */
+  lookAt?: [number, number, number];
+  /** Field of view in degrees — default: 50 */
+  fov?: number;
+}
+
+/**
  * Widget configuration options passed at runtime
  */
 export interface AvatarChatConfig {
@@ -68,6 +80,12 @@ export interface AvatarChatConfig {
 
   /** Callback on error */
   onError?: (error: Error) => void;
+
+  /** Camera framing configuration for the 3D avatar */
+  camera?: CameraConfig;
+
+  /** Camera framing for the small avatar in text-focus view (default: tight close-up) */
+  smallCamera?: CameraConfig;
 }
 
 /**
@@ -96,11 +114,25 @@ export interface AvatarChatInstance {
   reconnect(): Promise<void>;
   /** Trigger a client-side action manually for debugging */
   triggerAction(function_name: string, args?: Record<string, any>): void;
+  /** Update camera framing at runtime */
+  setCamera(config: CameraConfig): void;
 }
 
 /**
  * Default configuration values
  */
+export const DEFAULT_CAMERA: CameraConfig = {
+  position: [0, 1.8, 1],
+  lookAt: [0, 1.6, 0],
+  fov: 50,
+};
+
+export const DEFAULT_SMALL_CAMERA: CameraConfig = {
+  position: [0, 1.85, 0.25],
+  lookAt: [0, 1.75, 0],
+  fov: 30,
+};
+
 export const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   position: 'bottom-right',
   startCollapsed: true,
@@ -110,6 +142,8 @@ export const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
   enableText: true,
   authEnabled: false,
   logLevel: 'error',
+  camera: DEFAULT_CAMERA,
+  smallCamera: DEFAULT_SMALL_CAMERA,
   suggestions: [
     'What is your story?',
     'What services do you provide?',

@@ -83,6 +83,7 @@ chat.destroy();  // Cleanup
 | `authEnabled` | `boolean` | `false` | Enable HMAC authentication |
 | `avatarUrl` | `string` | auto-detected | URL to avatar ZIP file |
 | `assetsBaseUrl` | `string` | auto-detected | Base URL for worklet/assets |
+| `smallCamera` | `CameraConfig` | close-up face | Camera framing for avatar in text-focus view |
 | `customStyles` | `string` | `undefined` | Custom CSS to inject into Shadow DOM |
 | `logLevel` | `string` | `'error'` | `none`, `error`, `warn`, `info`, `debug` |
 
@@ -94,6 +95,101 @@ chat.destroy();  // Cleanup
 | `onConnectionChange` | `(connected: boolean) => void` | WebSocket connection status changed |
 | `onMessage` | `(msg: {role, text}) => void` | Message received from server |
 | `onError` | `(error: Error) => void` | Error occurred |
+
+---
+
+## Camera Control
+
+Control the 3D camera framing to adjust how the avatar is displayed.
+
+### Configuration
+
+Pass a `camera` object at init time:
+
+```typescript
+AvatarChat.init({
+  container: '#avatar-chat',
+  serverUrl: 'wss://...',
+  camera: {
+    position: [0, 1.9, 0.4],  // [x, y, z] — where the camera sits
+    lookAt: [0, 1.7, 0],      // [x, y, z] — where the camera points
+    fov: 40                    // field of view in degrees
+  }
+});
+```
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `position` | `[x, y, z]` | `[0, 1.8, 1]` | Camera position — centered, 1.8m high, 1m back |
+| `lookAt` | `[x, y, z]` | `[0, 1.6, 0]` | Camera target — chest height |
+| `fov` | `number` | `50` | Field of view in degrees (lower = more zoomed in) |
+
+### Axes
+
+- **X**: left (negative) / right (positive) — horizontal offset
+- **Y**: down (negative) / up (positive) — height
+- **Z**: closer to avatar (negative) / further away (positive)
+
+### Runtime Updates
+
+Adjust camera framing dynamically after initialization:
+
+```typescript
+const widget = AvatarChat.init({ ... });
+
+// Change to a close-up portrait shot
+widget.setCamera({
+  position: [0, 1.9, 0.3],
+  lookAt: [0, 1.75, 0],
+  fov: 35
+});
+```
+
+### Common Presets
+
+**Head & shoulders (portrait):**
+```typescript
+camera: { position: [0, 1.9, 0.4], lookAt: [0, 1.7, 0], fov: 40 }
+```
+
+**Upper body (default-like):**
+```typescript
+camera: { position: [0, 1.8, 1], lookAt: [0, 1.2, 0], fov: 50 }
+```
+
+**Close-up face:**
+```typescript
+camera: { position: [0, 1.85, 0.25], lookAt: [0, 1.75, 0], fov: 30 }
+```
+
+### Small Camera (Text-Focus View)
+
+When the widget switches to text-focus mode (chat visible with small avatar in header), the camera automatically reframes to a tight close-up. Configure this with `smallCamera`:
+
+```typescript
+AvatarChat.init({
+  container: '#avatar-chat',
+  serverUrl: 'wss://...',
+  camera: {
+    position: [0, 1.8, 1],
+    lookAt: [0, 1.6, 0],
+    fov: 50
+  },
+  smallCamera: {
+    position: [0, 1.85, 0.25],
+    lookAt: [0, 1.75, 0],
+    fov: 30
+  }
+});
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `smallCamera` | Close-up face preset | Camera framing used when avatar is shown small in text-focus view |
+
+The camera switches automatically when the user toggles between avatar-focus and text-focus modes. When switching back to avatar-focus, the main `camera` config is restored.
 
 ---
 
