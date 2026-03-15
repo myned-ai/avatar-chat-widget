@@ -30,6 +30,9 @@ export interface AvatarChatConfig {
   /** Enable/disable text input (default: true) */
   enableText?: boolean;
 
+  /** Show/hide the file attachment button (default: false) */
+  showAttachButton?: boolean;
+
   /** Path to avatar model (default: uses included default avatar) */
   avatarUrl?: string;
 

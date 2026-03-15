@@ -58,6 +58,8 @@ export interface ChatManagerOptions {
   handleRichContentLocally?: boolean;
   /** Callback when any rich content is received (whether local or not) */
   onRichContentReceived?: (item: RichContentItem) => void | Promise<void>;
+  /** Show the file attachment button (default: false) */
+  showAttachButton?: boolean;
   /** Debug mode */
   debug?: boolean;
 }
@@ -226,6 +228,10 @@ export class ChatManager implements Disposable {
     this.setupSyncPlaybackCallbacks();
     this.setupAutoScroll();
     this.setupEventListeners();
+    // Hide upload button unless explicitly enabled
+    if (this.options.showAttachButton !== true && this.uploadBtn) {
+      this.uploadBtn.style.display = 'none';
+    }
     this.setupAttachmentHandling();
     this.setupProtocolHandlers();
     this.startBlendshapeSync();
