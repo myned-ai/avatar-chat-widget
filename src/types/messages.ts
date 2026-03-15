@@ -5,11 +5,14 @@ export interface BaseMessage {
   timestamp: number;
 }
 
+import { AttachmentData, RichContentItem } from './protocol';
+
 // Outgoing Messages (Client -> Server)
 export interface OutgoingTextMessage extends BaseMessage {
   type: 'text';
   data: string;
   userId: string;
+  attachments?: AttachmentData[];
 }
 
 export interface OutgoingAudioMessage extends BaseMessage {
@@ -56,6 +59,16 @@ export interface InterruptOutMessage extends BaseMessage {
   type: 'interrupt';
 }
 
+// Client Event message
+export interface ClientEventOutMessage extends BaseMessage {
+  type: 'client_event';
+  name: string;
+  data?: Record<string, any>;
+  directive?: 'context' | 'speak' | 'trigger';
+  request_id?: string;
+  attachments?: AttachmentData[];
+}
+
 export type OutgoingMessage =
   | OutgoingTextMessage
   | OutgoingAudioMessage
@@ -64,7 +77,8 @@ export type OutgoingMessage =
   | AudioInputMessage
   | PingMessage
   | ChatMessageOut
-  | InterruptOutMessage;
+  | InterruptOutMessage
+  | ClientEventOutMessage;
 
 // Incoming Messages (Server -> Client)
 export interface IncomingTextMessage extends BaseMessage {
@@ -153,12 +167,21 @@ export interface ConfigMessage extends BaseMessage {
   };
 }
 
-export type IncomingMessage = 
-  | IncomingTextMessage 
-  | AudioStartMessage 
-  | AudioChunkMessage 
-  | AudioEndMessage 
-  | BlendshapeFrameMessage 
+export interface ServerEventMessage extends BaseMessage {
+  type: 'server_event';
+  name: string;
+  text?: string;
+  rich_content?: RichContentItem[];
+  reply_to_id?: string;
+  notify?: boolean;
+}
+
+export type IncomingMessage =
+  | IncomingTextMessage
+  | AudioStartMessage
+  | AudioChunkMessage
+  | AudioEndMessage
+  | BlendshapeFrameMessage
   | SyncFrameMessage
   | ErrorMessage
   | StatusMessage
@@ -166,7 +189,8 @@ export type IncomingMessage =
   | InterruptMessage
   | TranscriptDeltaMessage
   | TranscriptDoneMessage
-  | ConfigMessage;
+  | ConfigMessage
+  | ServerEventMessage;
 
 // Blendshape data structure
 export interface BlendshapeFrame {

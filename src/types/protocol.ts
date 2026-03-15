@@ -53,6 +53,37 @@ export interface TranscriptDoneEvent extends ProtocolEvent {
   turnId: string;
   interrupted?: boolean;
   itemId?: string;
+  rich_content?: RichContentItem[];
+}
+
+export interface RichContentItem {
+  /** High-level category (e.g., 'table', 'media', 'card', 'interactive', 'link') */
+  type: string;
+  /** Specific variant or rendering hint (e.g., 'chart_js', 'product_card', 'poll') */
+  subtype?: string;
+  /** Arbitrary JSON payload required to render this content */
+  payload: Record<string, any>;
+  /** Optional ID for stateful in-place updates */
+  item_id?: string;
+  /** Action indicating how to handle the item in the UI */
+  action?: 'append' | 'replace' | 'remove';
+}
+
+/**
+ * Sent by the server asynchronously, independent of any conversation turn.
+ */
+export interface ServerEventMessage extends ProtocolEvent {
+  type: 'server_event';
+  /** Event name for routing */
+  name: string;
+  /** Optional text to display as a chat bubble */
+  text?: string;
+  /** Optional rich content items to render in the chat feed */
+  rich_content?: RichContentItem[];
+  /** Optional ID to correlate with a client request */
+  reply_to_id?: string;
+  /** If true, the widget should play a notification sound / visual indicator */
+  notify?: boolean;
 }
 
 export interface InterruptEvent extends ProtocolEvent {
@@ -100,9 +131,33 @@ export interface AudioMessage {
   data: string; // Base64
 }
 
+export interface AttachmentData {
+  /** Base64 encoded file content */
+  content: string;
+  /** MIME type (e.g., 'image/jpeg', 'application/pdf') */
+  mime_type: string;
+  /** Original file name */
+  filename?: string;
+}
+
 export interface TextMessage {
   type: 'text';
   data: string;
+  attachments?: AttachmentData[];
+}
+
+export interface ClientEventMessage {
+  type: 'client_event';
+  /** The name of the event */
+  name: string;
+  /** Associated JSON data */
+  data?: Record<string, any>;
+  /** How the server should handle: 'context' (silent), 'speak' (interrupt AI), 'trigger' (bypass LLM) */
+  directive?: 'context' | 'speak' | 'trigger';
+  /** Optional correlation ID for awaitable responses */
+  request_id?: string;
+  /** Optional attachments (e.g., screenshots) accompanying the event */
+  attachments?: AttachmentData[];
 }
 
 export interface InterruptMessage {
@@ -119,4 +174,5 @@ export type OutgoingMessage =
   | AudioMessage
   | TextMessage
   | InterruptMessage
-  | PingMessage;
+  | PingMessage
+  | ClientEventMessage;

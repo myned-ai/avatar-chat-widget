@@ -13,7 +13,7 @@
  * Get the URL for avatar.gif, using the same CDN detection logic
  * as getDefaultAvatarUrl() in widget.ts uses for nyx.zip.
  */
-function getAvatarGifUrl(): string {
+function getAvatarGifUrl(assetsBaseUrl?: string): string {
   const scripts = document.getElementsByTagName('script');
   for (let i = 0; i < scripts.length; i++) {
     const src = scripts[i].src;
@@ -27,6 +27,9 @@ function getAvatarGifUrl(): string {
     }
   }
   // Fallback for npm usage or local development
+  if (assetsBaseUrl) {
+    return `${assetsBaseUrl.replace(/\/$/, '')}/asset/avatar.gif`;
+  }
   return './asset/avatar.gif';
 }
 
@@ -121,7 +124,20 @@ export const WIDGET_TEMPLATE = `
   <div class="input-layer">
     <div class="chat-input-area">
        <div class="chat-input-wrapper">
+         <!-- Hidden file input -->
+         <input type="file" id="fileUpload" style="display: none;" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
+         
+         <!-- Attachment Previews -->
+         <div class="chat-input-attachments" id="attachmentContainer"></div>
+         
          <div class="chat-input-controls">
+            <!-- Upload Button -->
+            <button type="button" id="uploadBtn" class="upload-btn" aria-label="Upload file" title="Upload File">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+              </svg>
+            </button>
+            
             <input type="text" id="chatInput" placeholder="Ask me anything..." aria-label="Message input" autocomplete="off" />
              
              <!-- Mic Button (Prominent) -->
@@ -140,8 +156,8 @@ export const WIDGET_TEMPLATE = `
 </div>
 `;
 
-export function getBubbleTemplate(): string {
-  const avatarGifUrl = getAvatarGifUrl();
+export function getBubbleTemplate(assetsBaseUrl?: string): string {
+  const avatarGifUrl = getAvatarGifUrl(assetsBaseUrl);
 
   return `
 <div class="bubble-container">

@@ -57,8 +57,18 @@ export interface AvatarChatConfig {
   /** Tooltip text shown on the chat bubble (default: greeting message) */
   tooltipText?: string;
 
+  /**
+   * If true, the widget will internally render rich content items in the chat feed.
+   * If false, it will only dispatch an event for the host site to handle.
+   * (default: true)
+   */
+  handleRichContentLocally?: boolean;
+
   /** Callback when widget is ready */
   onReady?: () => void;
+
+  /** Arbitrary context data sent to the AI upon connection for logic customization */
+  clientContext?: Record<string, any>;
 
   /** Callback when connection state changes */
   onConnectionChange?: (connected: boolean) => void;
@@ -68,6 +78,9 @@ export interface AvatarChatConfig {
 
   /** Callback on error */
   onError?: (error: Error) => void;
+
+  /** Debug mode */
+  debug?: boolean;
 }
 
 /**
@@ -94,8 +107,40 @@ export interface AvatarChatInstance {
   isConnected(): boolean;
   /** Manually reconnect to the server (resets reconnection counter) */
   reconnect(): Promise<void>;
+
   /** Trigger a client-side action manually for debugging */
   triggerAction(function_name: string, args?: Record<string, any>): void;
+
+  /** Send a background event to the AI server */
+  sendEvent(
+    name: string,
+    data?: Record<string, any>,
+    options?: { directive?: 'context' | 'speak' | 'trigger' }
+  ): Promise<void>;
+
+  /** Send a background event and await a response */
+  sendEventAsync(
+    name: string,
+    data?: Record<string, any>,
+    options?: {
+      directive?: 'context' | 'speak' | 'trigger';
+      timeoutMs?: number;
+      attachments?: any[];
+    }
+  ): Promise<any>;
+
+  /** Register a custom renderer for server-sent rich content */
+  registerRichRenderer(
+    type: string,
+    subtypeOrRenderer: string | ((payload: Record<string, any>, container: HTMLElement) => void),
+    renderer?: (payload: Record<string, any>, container: HTMLElement) => void
+  ): void;
+
+  /** Register a handler for standalone server-pushed events */
+  onServerEvent(
+    name: string,
+    handler: (event: import('../types/protocol').ServerEventMessage) => void
+  ): void;
 }
 
 /**
@@ -116,4 +161,5 @@ export const DEFAULT_CONFIG: Partial<AvatarChatConfig> = {
     'Can I book a meeting?',
   ],
   tooltipText: 'Hi! 👋 Ask me anything.',
+  handleRichContentLocally: true,
 };

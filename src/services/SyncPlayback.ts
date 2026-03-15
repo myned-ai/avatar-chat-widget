@@ -396,10 +396,13 @@ export class SyncPlayback implements Disposable {
     // Find the frame that should be playing right now
     let activeFrame: ScheduledFrame | null = null;
 
+    // Ensure index is within bounds (cleanupScheduledFrames might have changed array length)
+    this.lastActiveFrameIndex = Math.min(this.lastActiveFrameIndex, Math.max(0, this.scheduledFrames.length - 1));
+
     // Search from last known position (frames are time-ordered)
     for (let i = this.lastActiveFrameIndex; i < this.scheduledFrames.length; i++) {
       const frame = this.scheduledFrames[i];
-      if (currentTime >= frame.startTime && currentTime < frame.endTime) {
+      if (frame && currentTime >= frame.startTime && currentTime < frame.endTime) {
         activeFrame = frame;
         this.lastActiveFrameIndex = i;
         break;
@@ -410,7 +413,7 @@ export class SyncPlayback implements Disposable {
     if (!activeFrame && this.lastActiveFrameIndex > 0) {
       for (let i = 0; i < this.lastActiveFrameIndex; i++) {
         const frame = this.scheduledFrames[i];
-        if (currentTime >= frame.startTime && currentTime < frame.endTime) {
+        if (frame && currentTime >= frame.startTime && currentTime < frame.endTime) {
           activeFrame = frame;
           this.lastActiveFrameIndex = i;
           break;

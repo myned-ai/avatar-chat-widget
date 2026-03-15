@@ -11,7 +11,9 @@ import {
   InterruptEvent,
   AvatarStateEvent,
   ConfigEvent,
-  TriggerActionEvent
+  TriggerActionEvent,
+  AttachmentData,
+  ServerEventMessage
 } from '../types/protocol';
 
 const log = logger.scope('ProtocolClient');
@@ -118,7 +120,24 @@ export class AvatarProtocolClient extends EventEmitter {
     this.socket.on('interrupt', (msg: InterruptEvent) => this.handleInterrupt(msg));
     this.socket.on('avatar_state', (msg: AvatarStateEvent) => this.emit('avatar_state', msg));
     this.socket.on('trigger_action', (msg: TriggerActionEvent) => this.emit('trigger_action', msg));
+    this.socket.on('server_event', (msg: ServerEventMessage) => this.handleServerEvent(msg));
     this.socket.on('pong', (msg: { type: 'pong'; timestamp: number }) => log.debug('Pong received', msg));
+  }
+
+  /**
+   * Handle generic server events and resolve correlation IDs
+   */
+  private handleServerEvent(msg: ServerEventMessage) {
+    if (msg.reply_to_id) {
+      const pending = this.pendingRequests.get(msg.reply_to_id);
+      if (pending) {
+        log.debug(`[ASYNC] Resolved request ${msg.reply_to_id}`);
+        window.clearTimeout(pending.timeoutId);
+        this.pendingRequests.delete(msg.reply_to_id);
+        pending.resolve(msg);
+      }
+    }
+    this.emit('server_event', msg);
   }
 
   // ------------------------------------------------------------------
@@ -295,6 +314,69 @@ export class AvatarProtocolClient extends EventEmitter {
       data: text
     };
     this.socket.send(msg as OutgoingMessage);
+  }
+
+  /**
+   * Send a background client event to the server.
+   * This data is NOT displayed in the chat UI.
+   */
+  public sendClientEvent(
+    name: string,
+    data?: Record<string, any>,
+    directive: 'context' | 'speak' | 'trigger' = 'context',
+    request_id?: string,
+    attachments?: AttachmentData[]
+  ) {
+    log.info('Sending client event', { name, directive, request_id, has_attachments: !!attachments?.length });
+    const msg = { type: 'client_event', name, data, directive, request_id, attachments };
+    this.socket.send(msg as OutgoingMessage);
+  }
+
+  /**
+   * Map to track pending asynchronous requests.
+   * Key: request_id, Value: Promise controls + timeout ID.
+   */
+  private pendingRequests = new Map<string, {
+    resolve: (value: any) => void;
+    reject: (reason?: any) => void;
+    timeoutId: number;
+  }>();
+
+  /**
+   * Send a client event and await a response from the server (ServerEventMessage with matching reply_to_id).
+   */
+  public async sendEventAsync(
+    name: string,
+    data?: Record<string, any>,
+    options?: {
+      directive?: 'context' | 'speak' | 'trigger';
+      timeoutMs?: number;
+      attachments?: AttachmentData[];
+    }
+  ): Promise<any> {
+    const request_id = `req_${Math.random().toString(36).substring(2, 11)}`;
+    const timeoutMs = options?.timeoutMs || 10000;
+
+    log.debug(`[ASYNC] Sending ${name} (request_id: ${request_id})`);
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        if (this.pendingRequests.has(request_id)) {
+          this.pendingRequests.delete(request_id);
+          reject(new Error(`Request timed out after ${timeoutMs}ms (event: ${name})`));
+        }
+      }, timeoutMs);
+
+      this.pendingRequests.set(request_id, { resolve, reject, timeoutId });
+
+      this.sendClientEvent(
+        name,
+        data,
+        options?.directive || 'context',
+        request_id,
+        options?.attachments
+      );
+    });
   }
 
   public sendInterrupt() {

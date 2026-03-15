@@ -108,6 +108,9 @@ class AvatarChatElement extends HTMLElement {
   private _isConnected = false;
   private _isCollapsed = false;
   private visualViewportHandler: (() => void) | null = null;
+  /** Events buffered before chatManager is ready — flushed on init */
+  private _pendingEvents: Array<{ name: string; data?: Record<string, any>; options?: { directive?: string } }> = [];
+  private _pendingRenderers: Array<{ type: string; subtype: string | null; renderer: any }> = [];
 
   constructor() {
     super();
@@ -234,7 +237,7 @@ class AvatarChatElement extends HTMLElement {
     if (style) this.shadow.appendChild(style);
 
     const container = document.createElement('div');
-    container.innerHTML = getBubbleTemplate();
+    container.innerHTML = getBubbleTemplate(this.config.assetsBaseUrl || detectAssetsBaseUrl());
     const wrapper = container.firstElementChild;
 
     if (!wrapper) {
@@ -373,6 +376,21 @@ class AvatarChatElement extends HTMLElement {
         chatMessages,
         chatInput,
         micBtn,
+        debug: this.config.debug,
+        clientContext: this.config.clientContext,
+        handleRichContentLocally: this.config.handleRichContentLocally,
+        onRichContentReceived: async (item) => {
+          if (this.config.handleRichContentLocally !== false) {
+            // Internal handling: Force widget to show chat if it's currently hidden or collapsed
+            await this.expand();
+            this.drawerController?.setState('text-focus');
+            this.markHasMessages();
+          } else {
+            // External handling: Dispatch a dedicated event for the site
+            const customEvent = new CustomEvent('nyxRichContent', { detail: item });
+            window.dispatchEvent(customEvent);
+          }
+        },
         onConnectionChange: (connected) => {
           this._isConnected = connected;
           this.updateConnectionStatus(connected);
@@ -400,6 +418,9 @@ class AvatarChatElement extends HTMLElement {
 
           // Assistant messages: Simple subtitle display (no karaoke)
           if (role === 'assistant' && avatarSubtitles) {
+            // If the server initiates speech (e.g. from an event), ensure we clear the intro UI
+            this.markHasMessages();
+
             if (!text) {
               // Turn ended - clear subtitle
               avatarSubtitles.classList.remove('visible');
@@ -416,6 +437,28 @@ class AvatarChatElement extends HTMLElement {
 
       await this.chatManager.initialize();
       log.info('Chat initialized');
+
+      // Flush any sendEvent() calls that arrived before chatManager was ready
+      if (this._pendingEvents.length > 0) {
+        log.info(`Flushing ${this._pendingEvents.length} queued client event(s)`);
+        for (const ev of this._pendingEvents) {
+          if (ev.options?.directive === 'trigger') {
+            await this.chatManager.triggerAction(ev.name, ev.data);
+          } else {
+            this.chatManager.sendClientEvent(ev.name, ev.data, ev.options?.directive as any);
+          }
+        }
+        this._pendingEvents = [];
+      }
+
+      // Flush any registerRichRenderer() calls
+      if (this._pendingRenderers.length > 0) {
+        log.info(`Registering ${this._pendingRenderers.length} queued rich renderer(s)`);
+        for (const r of this._pendingRenderers) {
+          this.chatManager.registerRichRenderer(r.type, r.subtype, r.renderer);
+        }
+        this._pendingRenderers = [];
+      }
 
     } catch (error) {
       log.error('Failed to initialize chat:', error);
@@ -858,19 +901,85 @@ class AvatarChatElement extends HTMLElement {
   }
 
   /**
+   * Send a background event to the AI server
+   */
+  async sendEvent(
+    name: string,
+    data?: Record<string, any>,
+    options?: { directive?: 'context' | 'speak' | 'trigger' }
+  ): Promise<void> {
+    if (!this.chatManager) {
+      // Queue the event — it will be flushed once chatManager is initialized
+      log.info(`sendEvent('${name}') queued — chatManager not yet ready`);
+      this._pendingEvents.push({ name, data, options });
+      return;
+    }
+    this.chatManager.sendClientEvent(name, data, options?.directive);
+  }
+
+  /**
+   * Send a background event and await a response
+   */
+  async sendEventAsync(
+    name: string,
+    data?: Record<string, any>,
+    options?: {
+      directive?: 'context' | 'speak' | 'trigger';
+      timeoutMs?: number;
+      attachments?: any[];
+    }
+  ): Promise<any> {
+    if (!this.chatManager) {
+      throw new Error('ChatManager not initialized');
+    }
+    return this.chatManager.sendEventAsync(name, data, options);
+  }
+
+  /**
+   * Register a custom renderer for server-sent rich content
+   */
+  registerRichRenderer(
+    type: string,
+    subtypeOrRenderer: string | ((payload: Record<string, any>, container: HTMLElement) => void),
+    renderer?: (payload: Record<string, any>, container: HTMLElement) => void
+  ): void {
+    if (!this.chatManager) {
+      log.info(`Registration of rich renderer for '${type}' queued — chatManager not yet ready`);
+      const subtype = typeof subtypeOrRenderer === 'string' ? subtypeOrRenderer : null;
+      const actualRenderer = typeof subtypeOrRenderer === 'function' ? subtypeOrRenderer : renderer;
+      this._pendingRenderers.push({ type, subtype, renderer: actualRenderer });
+      return;
+    }
+
+    if (typeof subtypeOrRenderer === 'function') {
+      // Overload 1: registerRichRenderer(type, renderer)
+      this.chatManager.registerRichRenderer(type, null, subtypeOrRenderer);
+    } else if (typeof subtypeOrRenderer === 'string' && renderer) {
+      // Overload 2: registerRichRenderer(type, subtype, renderer)
+      this.chatManager.registerRichRenderer(type, subtypeOrRenderer, renderer);
+    }
+  }
+
+  /**
+   * Register a handler for standalone server-pushed events
+   */
+  onServerEvent(name: string, handler: (event: any) => void): void {
+    // Currently throwing until server event registry is implemented
+    throw new Error('onServerEvent not yet implemented');
+  }
+
+  /**
    * Expose triggerAction for client-side Actions debugging
    * Dispatches a custom nyxAction event as if the server triggered it
    */
-  triggerAction(function_name: string, args: Record<string, any> = {}): void {
-    const eventDetail = {
-      type: 'trigger_action',
-      function_name,
-      arguments: args,
-    };
-
-    log.info(`🛠️ Debug Action Triggered manually: ${function_name}`, args);
-    const customEvent = new CustomEvent('nyxAction', { detail: eventDetail });
-    window.dispatchEvent(customEvent);
+  async triggerAction(name: string, args: Record<string, any> = {}): Promise<void> {
+    if (this.chatManager) {
+      await this.chatManager.triggerAction(name, args);
+    } else {
+      // Buffer if not connected/ready
+      log.info(`triggerAction('${name}') queued — chatManager not yet ready`);
+      this._pendingEvents.push({ name, data: args, options: { directive: 'trigger' } });
+    }
   }
 
   /**
@@ -1153,6 +1262,10 @@ export const AvatarChat = {
     // Return instance API
     return {
       sendMessage: (text) => widget.sendMessage(text),
+      sendEvent: (name, data, options) => widget.sendEvent(name, data, options),
+      sendEventAsync: (name, data, options) => widget.sendEventAsync(name, data, options),
+      registerRichRenderer: (type, subtypeOrRenderer, renderer) => widget.registerRichRenderer(type, subtypeOrRenderer, renderer),
+      onServerEvent: (name, handler) => widget.onServerEvent(name, handler),
       mount: () => widget.mount(),
       destroy: () => {
         widget.destroy();
@@ -1188,6 +1301,10 @@ export const AvatarChat = {
     const widget = this._instance;
     return {
       sendMessage: (text) => widget.sendMessage(text),
+      sendEvent: (name, data, options) => widget.sendEvent(name, data, options),
+      sendEventAsync: (name, data, options) => widget.sendEventAsync(name, data, options),
+      registerRichRenderer: (type, subtypeOrRenderer, renderer) => widget.registerRichRenderer(type, subtypeOrRenderer, renderer),
+      onServerEvent: (name, handler) => widget.onServerEvent(name, handler),
       mount: () => widget.mount(),
       destroy: () => {
         widget.destroy();

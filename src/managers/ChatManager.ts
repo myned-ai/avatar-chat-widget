@@ -2,6 +2,7 @@
 // Uses extracted modules: SubtitleController, TranscriptManager, VoiceInputController
 
 import { AvatarProtocolClient } from '../services/AvatarProtocolClient';
+import html2canvas from 'html2canvas';
 import { SocketService } from '../services/SocketService';
 import type {
   AudioStartEvent,
@@ -10,7 +11,11 @@ import type {
   TranscriptDeltaEvent,
   TranscriptDoneEvent,
   InterruptEvent,
-  TriggerActionEvent
+  TriggerActionEvent,
+  RichContentItem,
+  ServerEventMessage,
+  ConfigEvent,
+  AttachmentData
 } from '../types/protocol';
 import { AudioInput } from '../services/AudioInput';
 import { AudioOutput } from '../services/AudioOutput';
@@ -47,6 +52,14 @@ export interface ChatManagerOptions {
   onError?: (error: Error) => void;
   /** Called on each transcript delta for subtitles */
   onSubtitleUpdate?: (text: string, role: 'user' | 'assistant') => void;
+  /** Arbitrary context data sent to the AI upon connection */
+  clientContext?: Record<string, any>;
+  /** Whether to render rich content internally (default: true) */
+  handleRichContentLocally?: boolean;
+  /** Callback when any rich content is received (whether local or not) */
+  onRichContentReceived?: (item: RichContentItem) => void | Promise<void>;
+  /** Debug mode */
+  debug?: boolean;
 }
 
 export class ChatManager implements Disposable {
@@ -58,6 +71,10 @@ export class ChatManager implements Disposable {
   private blendshapeBuffer: BlendshapeBuffer;
   private syncPlayback: SyncPlayback;
   private avatar: IAvatarController;
+
+  // Extensibility Registries
+  private richRenderers = new Map<string, (payload: Record<string, any>, container: HTMLElement) => void>();
+  private serverEventHandlers = new Map<string, (event: ServerEventMessage) => void>();
 
   // Extracted modules
   private subtitleController: SubtitleController;
@@ -88,8 +105,14 @@ export class ChatManager implements Disposable {
   private chatMessages: HTMLElement;
   private chatInput: HTMLInputElement;
   private micBtn: HTMLButtonElement;
+  private uploadBtn: HTMLButtonElement;
+  private fileUpload: HTMLInputElement;
+  private attachmentContainer: HTMLElement;
   private typingIndicator: HTMLElement | null = null;
   private typingStartTime: number = 0;
+
+  // Pending attachments for the next message
+  private pendingAttachments: File[] = [];
 
   // Animation state
   private animationFrameId: number | null = null;
@@ -137,12 +160,30 @@ export class ChatManager implements Disposable {
     this.blendshapeBuffer = new BlendshapeBuffer();
     this.syncPlayback = new SyncPlayback();
 
+    // Register default rich content renderers
+    this.registerRichRenderer('link_card', null, (payload, container) => {
+      container.innerHTML = `
+        <div class="nyx-rich-link-card" style="display:flex; gap:12px; align-items:center; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-top:8px; background:white; font-family:sans-serif; cursor:pointer; transition:transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.1)';" onmouseout="this.style.transform='none'; this.style.boxShadow='none';" onclick="window.open('${payload.url}', '_blank')">
+          ${payload.thumbnail ? `<div style="flex-shrink:0; width:60px; height:60px; border-radius:6px; overflow:hidden;"><img src="${payload.thumbnail}" style="width:100%; height:100%; object-fit:cover;" /></div>` : ''}
+          <div style="flex:1;">
+            <strong style="display:block; font-size:14px; margin-bottom:4px; color:#1e293b;">${payload.title || 'Link'}</strong>
+            <div style="font-size:12px; color:#64748b; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${payload.description || ''}</div>
+          </div>
+        </div>
+      `;
+    });
+
+
+
     // Get UI elements with proper null checks
     const root = options.shadowRoot || document;
 
     const chatMessagesEl = options.chatMessages || root.getElementById('chatMessages');
     const chatInputEl = options.chatInput || root.getElementById('chatInput');
     const micBtnEl = options.micBtn || root.getElementById('micBtn');
+    const uploadBtnEl = root.getElementById('uploadBtn');
+    const fileUploadEl = root.getElementById('fileUpload');
+    const attachmentContainerEl = root.getElementById('attachmentContainer');
 
     if (!chatMessagesEl) {
       throw new Error('ChatManager: chatMessages element not found');
@@ -157,6 +198,9 @@ export class ChatManager implements Disposable {
     this.chatMessages = chatMessagesEl;
     this.chatInput = chatInputEl as HTMLInputElement;
     this.micBtn = micBtnEl as HTMLButtonElement;
+    this.uploadBtn = uploadBtnEl as HTMLButtonElement;
+    this.fileUpload = fileUploadEl as HTMLInputElement;
+    this.attachmentContainer = attachmentContainerEl as HTMLElement;
     this.typingIndicator = root.getElementById('typingIndicator') as HTMLElement | null;
 
     // Initialize extracted modules
@@ -182,6 +226,7 @@ export class ChatManager implements Disposable {
     this.setupSyncPlaybackCallbacks();
     this.setupAutoScroll();
     this.setupEventListeners();
+    this.setupAttachmentHandling();
     this.setupProtocolHandlers();
     this.startBlendshapeSync();
   }
@@ -205,11 +250,12 @@ export class ChatManager implements Disposable {
     }
   }
 
-  sendText(text: string): void {
-    if (!text.trim()) return;
+  async sendText(text: string): Promise<void> {
+    const hasAttachments = this.pendingAttachments.length > 0;
+    if (!text.trim() && !hasAttachments) return;
 
-    this.options.onSubtitleUpdate?.(text, 'user');
-    this.transcriptManager.addMessage(text, 'user');
+    this.options.onSubtitleUpdate?.(text || 'Sent an attachment', 'user');
+    this.transcriptManager.addMessage(text || 'Sent an attachment', 'user');
 
     const message: OutgoingTextMessage = {
       type: 'text',
@@ -217,7 +263,48 @@ export class ChatManager implements Disposable {
       userId: this.userId,
       timestamp: Date.now(),
     };
+
+    if (hasAttachments) {
+      message.attachments = await Promise.all(
+        this.pendingAttachments.map(async (file) => ({
+          filename: file.name,
+          mime_type: file.type,
+          content: await this.fileToBase64(file),
+        }))
+      );
+      this.clearAttachments();
+    }
+
     this.socketService.send(message);
+    this.chatInput.value = '';
+  }
+
+  /**
+   * Send a background client event to the server.
+   */
+  public sendClientEvent(
+    name: string,
+    data?: Record<string, any>,
+    directive: 'context' | 'speak' | 'trigger' = 'context',
+    request_id?: string,
+    attachments?: AttachmentData[]
+  ): void {
+    this.protocolClient.sendClientEvent(name, data, directive, request_id, attachments);
+  }
+
+  /**
+   * Send a background client event and await a server response.
+   */
+  public async sendEventAsync(
+    name: string,
+    data?: Record<string, any>,
+    options?: {
+      directive?: 'context' | 'speak' | 'trigger';
+      timeoutMs?: number;
+      attachments?: AttachmentData[];
+    }
+  ): Promise<any> {
+    return this.protocolClient.sendEventAsync(name, data, options);
   }
 
   async reconnect(): Promise<void> {
@@ -337,10 +424,38 @@ export class ChatManager implements Disposable {
     }
   }
 
+  private setupAttachmentHandling(): void {
+    if (!this.uploadBtn || !this.fileUpload || !this.attachmentContainer) return;
+
+    // Trigger file dialog
+    this.uploadBtn.addEventListener('click', () => {
+      this.fileUpload.click();
+    });
+
+    // Handle file selection
+    this.fileUpload.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      if (target.files && target.files.length > 0) {
+        // Append new files to existing ones (max 5)
+        const newFiles = Array.from(target.files);
+        this.pendingAttachments = [...this.pendingAttachments, ...newFiles].slice(0, 5);
+        this.renderAttachmentPreviews();
+      }
+      // Reset input so the same file can be selected again if removed
+      target.value = '';
+    });
+  }
+
   private setupProtocolHandlers(): void {
     this.protocolClient.on('connected', () => {
       log.debug('Protocol Client connected');
       this.options.onConnectionChange?.(true);
+
+      // Fire the initialization context to the server if provided
+      if (this.options.clientContext) {
+        log.info('Sending client_init_config with clientContext to server');
+        this.sendClientEvent('client_init_config', this.options.clientContext, 'context');
+      }
     });
 
     this.protocolClient.on('disconnected', () => {
@@ -393,8 +508,12 @@ export class ChatManager implements Disposable {
       this.handleInterrupt(event);
     });
 
-    this.protocolClient.on('trigger_action', (event: TriggerActionEvent) => {
-      this.handleTriggerAction(event);
+    this.protocolClient.on('trigger_action', async (event: TriggerActionEvent) => {
+      await this.triggerAction(event);
+    });
+
+    this.protocolClient.on('server_event', (event: ServerEventMessage) => {
+      this.handleServerEvent(event);
     });
 
     this.protocolClient.on('error', (err) => log.error('Protocol Error:', err));
@@ -404,10 +523,268 @@ export class ChatManager implements Disposable {
   // Protocol Handlers
   // ============================================================================
 
-  private handleTriggerAction(event: TriggerActionEvent): void {
+  /**
+   * Manually trigger a client-side action (used by server messages or local debug calls)
+   */
+  public async triggerAction(nameOrEvent: string | TriggerActionEvent, args?: Record<string, any>): Promise<void> {
+    const event: TriggerActionEvent = typeof nameOrEvent === 'string'
+      ? { type: 'trigger_action', function_name: nameOrEvent, arguments: args || {} }
+      : nameOrEvent;
+
     log.info(`🎯 Action Triggered: ${event.function_name}`, event.arguments);
+
+    // Intercept native visual context requests
+    if (event.function_name === 'request_screen_context') {
+      this.captureAndSendScreenContext();
+      return;
+    }
+
+    // Intercept rich content pushes from AI tool calls
+    if (event.function_name === 'send_rich_content') {
+      const args = event.arguments;
+      try {
+        const payload = typeof args.payload_json === 'string'
+          ? JSON.parse(args.payload_json)
+          : args.payload_json;
+
+        const richItem: RichContentItem = {
+          type: args.content_type || 'unspecified',
+          item_id: args.item_id,
+          action: args.action || 'replace',
+          payload: payload
+        };
+
+        log.info(`[RICH] Tool call received: ${richItem.type}`);
+
+        // Notify callback (always)
+        if (this.options.onRichContentReceived) {
+          const result = this.options.onRichContentReceived(richItem);
+          if (result instanceof Promise) {
+            await result;
+          }
+        }
+
+        // If local handling is ENABLED, we render and stop here (intercept)
+        // This prevents nyxAction from firing if the site already has a local renderer
+        if (this.options.handleRichContentLocally !== false) {
+          this.renderRichContent([richItem]);
+          return;
+        }
+
+        // If local handling is DISABLED, we proceed to fire nyxAction
+        // The host site should handle it via the nyxAction event.
+      } catch (err) {
+        log.error('Failed to parse rich_content payload from tool call:', err);
+      }
+    }
+
     const customEvent = new CustomEvent('nyxAction', { detail: event });
     window.dispatchEvent(customEvent);
+  }
+
+  /**
+   * Captures the current DOM visually and sends it silently to the AI as context.
+   */
+  private async captureAndSendScreenContext(): Promise<void> {
+    try {
+      log.info('Capturing screen context via html2canvas...');
+
+      // Optional: Flash a brief, non-intrusive toast notification (Hackathon Privacy Requirement)
+      this.showToastNotification('Nyx is analyzing your screen...');
+
+      // Capture the body (or a specific container)
+      const canvas = await html2canvas(document.body, {
+        ignoreElements: (element) => {
+          // Ignore the chat widget itself to avoid infinite loops or mirroring
+          if (element.id === 'myned-widget-root' || element.tagName.toLowerCase() === 'avatar-chat-widget') {
+            return true;
+          }
+          // Ignore the demo sidebar because it contains debug controls that confuse the AI
+          if (element.classList.contains('sidebar')) {
+            return true;
+          }
+          // Mask password inputs or explicitly private elements
+          if (element instanceof HTMLInputElement && element.type === 'password') {
+            return true;
+          }
+          if (element.hasAttribute('data-private')) {
+            return true;
+          }
+          return false;
+        },
+        logging: false,
+        useCORS: true, // Required if capturing external images
+        scale: 2 // Double the resolution to improve text recognition (DPI) for AI vision
+      });
+
+      // Convert to Base64 JPEG
+      const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+
+      if (!base64Data) {
+        throw new Error('Canvas conversion yielded empty data');
+      }
+
+      log.info('Screen context captured, sending to server...');
+
+      // Extract high-level DOM text context as a fallback/aid to the vision model
+      // We clone the body or walk the real DOM to build a Markdown-inspired accessibility tree.
+      let pageTextContent = "No text content extractable.";
+      try {
+        const unwantedSelectors = ['script', 'style', 'noscript', 'avatar-chat-widget', '#myned-widget-root', '.sidebar', '[data-private]'];
+        
+        const walkDOM = (node: Element, depth: number): string => {
+          if (unwantedSelectors.some(sel => node.matches(sel))) return '';
+          
+          let output = '';
+          const indent = '  '.repeat(depth);
+          const tag = node.tagName.toLowerCase();
+          
+          let nodeText = '';
+          for (const child of Array.from(node.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              const text = child.textContent?.trim();
+              if (text) nodeText += text + ' ';
+            }
+          }
+          nodeText = nodeText.trim();
+
+          const ariaLabel = node.getAttribute('aria-label');
+          const role = node.getAttribute('role');
+          const textToUse = ariaLabel || nodeText;
+
+          if (tag === 'button' || role === 'button') {
+            output += `${indent}[Button: ${textToUse}]\n`;
+          } else if (tag === 'a' || role === 'link') {
+            const href = node.getAttribute('href') || '';
+            output += `${indent}[Link: ${textToUse}](${href})\n`;
+          } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+            const input = node as HTMLInputElement;
+            const type = input.type || tag;
+            const placeholder = input.placeholder || '';
+            const value = type === 'password' ? '***' : input.value;
+            output += `${indent}[Input - ${type}] placeholder: "${placeholder}", value: "${value}"\n`;
+          } else if (tag === 'img' || role === 'img') {
+            const alt = node.getAttribute('alt') || ariaLabel || '';
+            if (alt) output += `${indent}[Image: ${alt}]\n`;
+          } else if (/^h[1-6]$/.test(tag)) {
+            const level = parseInt(tag[1]);
+            output += `${indent}${ '#'.repeat(level) } ${textToUse}\n`;
+          } else if (nodeText) {
+            output += `${indent}${nodeText}\n`;
+          }
+
+          for (const child of Array.from(node.children)) {
+            const childOut = walkDOM(child, depth + 1);
+            if (childOut) output += childOut;
+          }
+
+          return output;
+        };
+
+        const rawTree = walkDOM(document.body, 0);
+        // Clean up excessive newlines and limit
+        pageTextContent = rawTree.replace(/\n\s*\n/g, '\n').trim().substring(0, 10000); 
+      } catch (e) {
+        log.warn("Failed to extract page text context", e);
+      }
+
+      const contextData = {
+        title: document.title,
+        url: window.location.href,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight
+        },
+        extracted_text: pageTextContent
+      };
+
+      // [DEBUG] Show the captured screenshot as a thumbnail in the chat
+      if ((this.options as any).debug) {
+        const debugImg = document.createElement('div');
+        debugImg.className = 'nyx-debug-screenshot';
+        debugImg.innerHTML = `
+          <div style="margin:8px 0;padding:8px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;font-family:sans-serif;">
+            <div style="font-size:11px;color:#92400e;margin-bottom:6px;font-weight:600;">🐛 Debug: Screenshot sent to AI</div>
+            <img src="${canvas.toDataURL('image/jpeg', 0.6)}" style="max-width:100%;border-radius:4px;border:1px solid #e5e7eb;" />
+          </div>
+        `;
+        this.chatMessages.appendChild(debugImg);
+        this.scrollToBottom();
+      }
+
+      const attachment: AttachmentData = {
+        content: base64Data,
+        mime_type: 'image/jpeg',
+        filename: `screenshot_${Date.now()}.jpg`
+      };
+
+      // Send with 'trigger' directive so the AI actively responds with its layout analysis
+      this.sendClientEvent('screen_context_provided', contextData, 'trigger', undefined, [attachment]);
+    } catch (err) {
+      log.error('Failed to capture or send screen context:', err);
+    }
+  }
+
+  /**
+   * Helper to flash a brief notification
+   */
+  private showToastNotification(message: string): void {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.position = 'fixed';
+    toast.style.bottom = '20px';
+    toast.style.left = '50%';
+    toast.style.transform = 'translateX(-50%)';
+    toast.style.backgroundColor = 'rgba(0,0,0,0.8)';
+    toast.style.color = 'white';
+    toast.style.padding = '8px 16px';
+    toast.style.borderRadius = '20px';
+    toast.style.fontSize = '12px';
+    toast.style.zIndex = '99999';
+    toast.style.pointerEvents = 'none';
+    toast.style.transition = 'opacity 0.3s';
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 2500);
+  }
+
+  private handleServerEvent(event: ServerEventMessage): void {
+    log.info(`[SERVER_EVENT] Received ${event.name}`, event);
+
+    // Dispatch to registered handler if it exists
+    const handler = this.serverEventHandlers.get(event.name);
+    if (handler) {
+      handler(event);
+    }
+
+    // Default handling: if it has text, render it
+    if (event.text) {
+      this.transcriptManager.addMessage(event.text, 'assistant');
+    }
+
+    // Default handling: if it has rich_content, render it
+    if (event.rich_content?.length) {
+      log.info(`[RICH] server_event contained ${event.rich_content.length} rich items`);
+
+      // Notify callback for each item
+      if (this.options.onRichContentReceived) {
+        event.rich_content.forEach(item => this.options.onRichContentReceived!(item));
+      }
+
+      // Render internally if enabled
+      if (this.options.handleRichContentLocally !== false) {
+        this.renderRichContent(event.rich_content);
+      }
+    }
+
+    if (event.notify) {
+      // Could play a sound or pulse here
+      log.debug('Notification requested by server_event');
+    }
   }
 
   private handleAudioStart(event: AudioStartEvent): void {
@@ -596,6 +973,22 @@ export class ChatManager implements Disposable {
         // Server sent truncated text for interrupted turn
         this.transcriptManager.replaceAssistantTurnText(event.text);
       }
+
+      // Inline Rich Content Rendering from TranscriptDoneEvent
+      if (event.rich_content?.length) {
+        log.info(`[RICH] transcript_done contained ${event.rich_content.length} rich items`);
+
+        // Notify callback for each item
+        if (this.options.onRichContentReceived) {
+          event.rich_content.forEach(item => this.options.onRichContentReceived!(item));
+        }
+
+        // Render internally if enabled
+        if (this.options.handleRichContentLocally !== false) {
+          this.renderRichContent(event.rich_content);
+        }
+      }
+
       // Don't finalize if queue still has items - let playbackEnd handle it
       // This prevents creating new bubbles when dequeued words arrive after transcript_done
       if (this.transcriptQueue.length === 0) {
@@ -686,6 +1079,83 @@ export class ChatManager implements Disposable {
   // ============================================================================
   // Private Helpers
   // ============================================================================
+
+  private renderRichContent(items: RichContentItem[]): void {
+    const chatContainer = this.chatMessages;
+    if (!chatContainer) return;
+
+    for (const item of items) {
+      const key = item.subtype ? `${item.type}:${item.subtype}` : item.type;
+      const renderer = this.richRenderers.get(key)
+        ?? this.richRenderers.get(item.type);
+
+      if (item.action === 'remove' && item.item_id) {
+        const existingNode = chatContainer.querySelector(`[data-rich-id="${item.item_id}"]`);
+        if (existingNode) existingNode.remove();
+        continue;
+      }
+
+      const container = document.createElement('div');
+      container.className = 'nyx-rich-content-item';
+      if (item.item_id) {
+        container.dataset.richId = item.item_id;
+      }
+
+      if (renderer) {
+        try {
+          renderer(item.payload, container);
+        } catch (err) {
+          log.error(`Rich renderer failed for ${key}:`, err);
+          container.innerHTML = `<div class="error-slate">Renderer failed: ${key}</div>`;
+        }
+      } else {
+        log.warn(`No renderer found for rich content type: ${key}, using generic card`);
+        // Generic fallback: auto-render any payload as a styled card
+        const p = item.payload || {};
+        const title = p.name || p.title || key;
+        const description = p.description || p.subtitle || '';
+        const price = p.price || '';
+        const emoji = p.emoji || p.icon || '';
+        const url = p.url || '';
+
+        // Collect remaining fields (excluding ones we've already used)
+        const usedKeys = new Set(['name', 'title', 'description', 'subtitle', 'price', 'emoji', 'icon', 'url']);
+        const extraFields: string[] = [];
+        for (const [k, v] of Object.entries(p)) {
+          if (usedKeys.has(k)) continue;
+          if (Array.isArray(v)) {
+            extraFields.push(`<div style="margin-top:6px;"><strong style="font-size:11px;text-transform:uppercase;color:#94a3b8;">${k}</strong><ul style="list-style:none;padding:0;margin:4px 0 0;">${v.map((item: any) => `<li style="padding:2px 0;font-size:12px;color:#475569;">✓ ${item}</li>`).join('')}</ul></div>`);
+          } else if (typeof v === 'string' || typeof v === 'number') {
+            extraFields.push(`<div style="font-size:12px;color:#64748b;margin-top:2px;"><span style="color:#94a3b8;">${k}:</span> ${v}</div>`);
+          }
+        }
+
+        const clickAttr = url ? `cursor:pointer;" onclick="window.open('${url}', '_blank')` : '';
+        container.innerHTML = `
+          <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-top:8px;background:white;font-family:sans-serif;transition:transform 0.2s,box-shadow 0.2s;${clickAttr}" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)';" onmouseout="this.style.transform='none';this.style.boxShadow='none';">
+            ${emoji ? `<div style="font-size:24px;margin-bottom:6px;">${emoji}</div>` : ''}
+            <strong style="display:block;font-size:14px;color:#1e293b;margin-bottom:2px;">${title}</strong>
+            ${price ? `<div style="font-size:18px;font-weight:700;color:#6366f1;margin-bottom:4px;">${price}</div>` : ''}
+            ${description ? `<div style="font-size:12px;color:#64748b;margin-bottom:4px;">${description}</div>` : ''}
+            ${extraFields.join('')}
+          </div>
+        `;
+      }
+
+      if (item.action === 'replace' && item.item_id) {
+        const existingNode = chatContainer.querySelector(`[data-rich-id="${item.item_id}"]`);
+        if (existingNode) {
+          existingNode.replaceWith(container);
+        } else {
+          chatContainer.appendChild(container);
+        }
+      } else {
+        chatContainer.appendChild(container);
+      }
+    }
+
+    // Auto-scroll logic handled by observer
+  }
 
   private sendTextMessage(): void {
     const text = this.chatInput.value.trim();
@@ -866,6 +1336,19 @@ export class ChatManager implements Disposable {
     }
   }
 
+  /**
+   * Register a custom renderer for rich content items
+   */
+  public registerRichRenderer(
+    type: string,
+    subtype: string | null,
+    renderer: (payload: Record<string, any>, container: HTMLElement) => void
+  ): void {
+    const key = subtype ? `${type}:${subtype}` : type;
+    log.info(`Registered rich renderer for: ${key}`);
+    this.richRenderers.set(key, renderer);
+  }
+
   private setTyping(typing: boolean): void {
     if (!this.typingIndicator) return;
 
@@ -921,6 +1404,71 @@ export class ChatManager implements Disposable {
     const id = `user_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     localStorage.setItem('avatar-chat-user-id', id);
     return id;
+  }
+
+  private renderAttachmentPreviews(): void {
+    if (!this.attachmentContainer) return;
+
+    this.attachmentContainer.innerHTML = '';
+    this.pendingAttachments.forEach((file, index) => {
+      const preview = document.createElement('div');
+      preview.className = 'attachment-preview';
+
+      if (file.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.onload = () => URL.revokeObjectURL(img.src);
+        preview.appendChild(img);
+      } else {
+        // Generic document icon for non-images
+        preview.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        `;
+      }
+
+      const removeBtn = document.createElement('div');
+      removeBtn.className = 'attachment-remove';
+      removeBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      `;
+      removeBtn.onclick = () => {
+        this.pendingAttachments.splice(index, 1);
+        this.renderAttachmentPreviews();
+      };
+
+      preview.appendChild(removeBtn);
+      this.attachmentContainer.appendChild(preview);
+    });
+  }
+
+  private clearAttachments(): void {
+    this.pendingAttachments = [];
+    if (this.attachmentContainer) {
+      this.attachmentContainer.innerHTML = '';
+    }
+  }
+
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Strip the data:mime/type;base64, prefix
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
   }
 
   private decodeBase64ToArrayBuffer(base64: string): ArrayBuffer {

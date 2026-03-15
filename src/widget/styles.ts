@@ -488,6 +488,20 @@ const CHAT_STYLES = `
   pointer-events: auto;
 }
 
+.nyx-rich-content-item {
+  margin-top: 12px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+  pointer-events: auto !important;
+  z-index: 20;
+  animation: nyxSlideUp 0.3s ease-out;
+}
+
+@keyframes nyxSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Scrollbar hover effect */
 .chat-messages:hover { scrollbar-color: rgba(0,0,0,0.15) transparent; }
 
@@ -509,7 +523,8 @@ const CHAT_STYLES = `
   transition: opacity 0.2s ease;
 }
 
-.quick-replies.hidden {
+.quick-replies.hidden,
+.widget-root.has-messages .quick-replies {
   opacity: 0;
   pointer-events: none;
 }
@@ -632,7 +647,71 @@ const INPUT_STYLES = `
   flex-shrink: 0;
 }
 
-.chat-input-wrapper { margin-bottom: 8px; }
+.chat-input-attachments {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px 8px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-input-attachments::-webkit-scrollbar { display: none; }
+.chat-input-attachments:empty { display: none; }
+
+.attachment-preview {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.attachment-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-preview svg {
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+}
+
+.attachment-remove {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  z-index: 2;
+}
+
+.attachment-remove:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.attachment-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-input-wrapper { margin-bottom: 8px; position: relative; }
 
 .chat-input-controls {
   display: flex;
@@ -666,6 +745,32 @@ const INPUT_STYLES = `
   outline: none;
   font-family: inherit;
   transition: box-shadow 0.2s;
+}
+
+/* File Upload Button */
+.upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.upload-btn:hover {
+  background: var(--input-bg);
+  color: var(--primary-color);
+}
+
+.upload-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 #chatInput:focus {

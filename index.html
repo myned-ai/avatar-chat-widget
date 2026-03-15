@@ -4,98 +4,1402 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="x-ua-compatible" content="ie=edge">
-  <title>Nyx Web Chat Demo</title>
+  <title>Nyx Avatar Chat — Feature Demo</title>
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+  <!-- model-viewer is loaded as an ES module to prevent its bundled Three.js from colliding with the 3D Avatar's Three.js instance -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
   <style>
-    * {
+    *,
+    *::before,
+    *::after {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
 
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #232637;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #6c63ff;
+      --accent2: #4ecdc4;
+      --text: #e8eaf0;
+      --text-muted: #8b8fa8;
+      --radius: 12px;
+      --glow: 0 0 20px rgba(108, 99, 255, 0.25);
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      overflow: hidden;
-      background: #204959;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      scroll-behavior: smooth;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(108, 99, 255, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(78, 205, 196, 0.08) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .layout {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 340px 1fr;
       min-height: 100vh;
     }
 
-    .debug-actions {
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      z-index: 9999;
-      background: white;
-      padding: 10px;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    /* ── Sidebar ── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 28px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+      height: 100vh;
+      position: sticky;
+      top: 0;
     }
 
-    .debug-actions button {
+    .sidebar-header h1 {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .sidebar-header p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .conn-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-top: 8px;
+      color: var(--text-muted);
+    }
+
+    .conn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+
+    .conn-dot.connected {
+      background: #50c878;
+      box-shadow: 0 0 6px rgba(80, 200, 120, 0.6);
+    }
+
+    .conn-dot.disconnected {
+      background: #ff6b6b;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 20px;
+      margin-bottom: 8px;
+    }
+
+    .badge-purple {
+      background: rgba(108, 99, 255, 0.2);
+      color: #a69cff;
+      border: 1px solid rgba(108, 99, 255, 0.3);
+    }
+
+    .badge-teal {
+      background: rgba(78, 205, 196, 0.15);
+      color: #4ecdc4;
+      border: 1px solid rgba(78, 205, 196, 0.25);
+    }
+
+    .badge-red {
+      background: rgba(255, 107, 107, 0.15);
+      color: #ff6b6b;
+      border: 1px solid rgba(255, 107, 107, 0.25);
+    }
+
+    .badge-green {
+      background: rgba(80, 200, 120, 0.15);
+      color: #50c878;
+      border: 1px solid rgba(80, 200, 120, 0.25);
+    }
+
+    .panel {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+
+    .panel h2 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .panel p {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+      padding: 9px 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      margin-bottom: 6px;
+      text-align: left;
+    }
+
+    .btn:last-child {
+      margin-bottom: 0;
+    }
+
+    .btn .icon {
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .btn .label {
+      flex: 1;
+    }
+
+    .btn .hint {
+      font-size: 10px;
+      opacity: 0.6;
+      font-family: monospace;
+    }
+
+    .btn-purple {
+      background: rgba(108, 99, 255, 0.15);
+      color: #a69cff;
+      border: 1px solid rgba(108, 99, 255, 0.25);
+    }
+
+    .btn-purple:hover {
+      background: rgba(108, 99, 255, 0.28);
+      box-shadow: var(--glow);
+      transform: translateY(-1px);
+    }
+
+    .btn-teal {
+      background: rgba(78, 205, 196, 0.12);
+      color: #4ecdc4;
+      border: 1px solid rgba(78, 205, 196, 0.22);
+    }
+
+    .btn-teal:hover {
+      background: rgba(78, 205, 196, 0.22);
+      transform: translateY(-1px);
+    }
+
+    .btn-red {
+      background: rgba(255, 107, 107, 0.12);
+      color: #ff6b6b;
+      border: 1px solid rgba(255, 107, 107, 0.22);
+    }
+
+    .btn-red:hover {
+      background: rgba(255, 107, 107, 0.22);
+      transform: translateY(-1px);
+    }
+
+    .btn-green {
+      background: rgba(80, 200, 120, 0.12);
+      color: #50c878;
+      border: 1px solid rgba(80, 200, 120, 0.22);
+    }
+
+    .btn-green:hover {
+      background: rgba(80, 200, 120, 0.22);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+
+    .context-status {
+      background: rgba(108, 99, 255, 0.08);
+      border: 1px solid rgba(108, 99, 255, 0.2);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #a69cff;
+      font-family: monospace;
+      line-height: 1.7;
+    }
+
+    .event-log {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--text-muted);
+      max-height: 110px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      margin-top: 10px;
+    }
+
+    .event-log .log-entry {
+      padding: 2px 0;
+      display: flex;
+      gap: 8px;
+    }
+
+    .log-ts {
+      color: #555;
+      flex-shrink: 0;
+    }
+
+    .log-name {
+      color: #4ecdc4;
+    }
+
+    .btn-demo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       padding: 8px 16px;
-      background: #4B4ACF;
+      background: var(--accent);
       color: white;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
-      font-weight: bold;
+      transition: all 0.2s;
     }
 
-    .debug-actions button:hover {
-      background: #3a39a8;
+    .btn-demo:hover {
+      background: #5b54e6;
+      transform: translateY(-1px);
+    }
+
+    .btn-demo.secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-demo.secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 6px 0;
+    }
+
+    /* ── Main ── */
+    .main {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      padding: 40px;
+    }
+
+    .hero {
+      text-align: center;
+      max-width: 520px;
+    }
+
+    .hero h2 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      line-height: 1.2;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, #fff 40%, #a69cff);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+
+    .hero code {
+      background: rgba(108, 99, 255, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      -webkit-text-fill-color: #a69cff;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      max-width: 640px;
+      width: 100%;
+    }
+
+    .product-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .product-card:hover {
+      border-color: rgba(108, 99, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+
+    .product-card.active {
+      border-color: rgba(108, 99, 255, 0.6);
+      box-shadow: 0 0 0 1px rgba(108, 99, 255, 0.3), var(--glow);
+    }
+
+    .product-emoji {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+
+    .product-name {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .product-price {
+      font-size: 11px;
+      color: #4ecdc4;
+      font-weight: 500;
+    }
+
+    .product-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: -8px;
+    }
+
+    /* ── Rich content demo ── */
+    #richDemo {
+      display: none;
+      background: var(--surface2);
+      border: 1px solid rgba(78, 205, 196, 0.3);
+      border-radius: var(--radius);
+      padding: 20px;
+      max-width: 480px;
+      width: 100%;
+      animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    #richDemo.visible {
+      display: block;
+    }
+
+    @keyframes popIn {
+      from {
+        opacity: 0;
+        transform: scale(0.9) translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    #richDemo h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #4ecdc4;
+    }
+
+    #richDemo table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    #richDemo th {
+      padding: 8px 10px;
+      text-align: left;
+      background: rgba(78, 205, 196, 0.1);
+      color: #4ecdc4;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    #richDemo td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    #richDemo tr:last-child td {
+      border-bottom: none;
+    }
+
+    #richDemo .check {
+      color: #50c878;
+    }
+
+    #richDemo .dash {
+      color: var(--text-muted);
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 
 <body>
-  <!-- <div class="debug-actions">
-    <button id="confettiBtn">Test Confetti Action</button>
-  </div> -->
+  <div class="layout">
+
+    <!-- ─────────── Sidebar ─────────── -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="badge badge-purple">✦ Developer Demo</div>
+        <h1>Nyx Feature Playground</h1>
+        <p>Interactive controls showing the new client event system, rich messaging, and prompt security features.</p>
+        <div class="conn-status">
+          <span class="conn-dot disconnected" id="connDot"></span>
+          <span id="connLabel">Connecting…</span>
+        </div>
+      </div>
+
+      <!-- 1: clientContext -->
+      <div class="panel">
+        <div class="badge badge-purple">clientContext</div>
+        <h2>🚀 Initialization Config</h2>
+        <p>Sent automatically on connect. The AI reads this silently and adapts for this session.</p>
+        <div class="context-status">
+          navigation_sections: top, home,<br>&nbsp;&nbsp;pricing, contact_us, bottom<br>
+          page_topic: "Feature Demo"<br>
+          user_tier: "Developer"
+        </div>
+      </div>
+
+      <!-- 2: sendEvent -->
+      <div class="panel">
+        <div class="badge badge-teal">sendEvent</div>
+        <h2>📡 Client Events</h2>
+        <p>
+          Use <code
+            style="background:rgba(78,205,196,0.15);padding:1px 5px;border-radius:4px;color:#4ecdc4">directive:'context'</code>
+          to send data silently,
+          or <code
+            style="background:rgba(108,99,255,0.15);padding:1px 5px;border-radius:4px;color:#a69cff">directive:'speak'</code>
+          to make the agent respond immediately.
+        </p>
+        <button class="btn btn-teal" id="btnContext">
+          <span class="icon">👁️</span>
+          <span class="label">page_view event</span>
+          <span class="hint">context</span>
+        </button>
+        <button class="btn btn-purple" id="btnSpeak">
+          <span class="icon">🎙️</span>
+          <span class="label">promo_ended event</span>
+          <span class="hint">speak → AI responds</span>
+        </button>
+        <button class="btn btn-red" id="btnPayFail">
+          <span class="icon">⚠️</span>
+          <span class="label">payment_failed event</span>
+          <span class="hint">speak → AI responds</span>
+        </button>
+        <hr class="divider">
+        <div class="event-log" id="eventLog">
+          <div class="log-entry"><span class="log-ts">--:--</span><span style="color:#555">&nbsp;ready…</span></div>
+        </div>
+      </div>
+
+      <!-- 3: Rich Content -->
+      <div class="panel">
+        <div class="badge badge-green">registerRichRenderer</div>
+        <h2>🖼️ Rich Content</h2>
+        <p>Simulate the server pushing a structured pricing table via <code
+            style="color:#50c878;background:rgba(80,200,120,0.1);padding:1px 5px;border-radius:4px">send_rich_content</code>.
+        </p>
+        <div
+          style="margin: 10px 0; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; display: flex; align-items: center; gap: 10px; font-size: 11px;">
+          <span style="color: var(--text-muted)">Handling:</span>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="richMode" value="local" checked> Internal
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="richMode" value="external"> External (Event)
+          </label>
+        </div>
+
+        <button class="btn btn-green" id="btnRichPricing">
+          <span class="icon">📊</span>
+          <span class="label">Show Pricing Table</span>
+          <span class="hint">type: pricing_table</span>
+        </button>
+        <button class="btn btn-teal" id="idRichSpotlight">
+          <span class="icon">✨</span>
+          <span class="label">Show Product Spotlight</span>
+          <span class="hint">type: product_spotlight</span>
+        </button>
+        <button class="btn btn-ghost" id="btnRichHide">
+          <span class="icon">✕</span>
+          <span class="label">Dismiss</span>
+        </button>
+      </div>
+
+      <!-- 4: Actions -->
+      <div class="panel">
+        <div class="badge badge-red">triggerAction</div>
+        <h2>⚡ AI Actions</h2>
+        <p>Client-side actions the AI would normally fire via tool calls.</p>
+        <button class="btn btn-purple" id="btnConfetti">
+          <span class="icon">🎉</span>
+          <span class="label">Trigger Confetti</span>
+        </button>
+        <button class="btn btn-purple" id="btnLinkCard">
+          <span class="icon">🔗</span>
+          <span class="label">Trigger Link Card</span>
+          <span class="hint">type: link_card</span>
+        </button>
+        <button class="btn btn-ghost" id="btnNavContact">
+          <span class="icon">📬</span>
+          <span class="label">Navigate → Contact Form</span>
+        </button>
+        <button class="btn btn-ghost" id="btnNavTop">
+          <span class="icon">⬆️</span>
+          <span class="label">Navigate → Top</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ─────────── Main ─────────── -->
+    <main class="main">
+      <!-- TOP NAVIGATION -->
+      <nav style="position: fixed; top: 0; right: 0; width: calc(100% - 340px); z-index: 100; background: rgba(15, 17, 23, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 16px 40px; display: flex; justify-content: center; gap: 32px;">
+        <a href="#home" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Home</a>
+        <a href="#features" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Products</a>
+        <a href="#pricing" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Pricing</a>
+        <a href="#contact_us" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Contact</a>
+      </nav>
+
+      <!-- HERO SECTION -->
+      <section id="home" class="hero"
+        style="min-height: 400px; display: flex; flex-direction: column; justify-content: center; align-items: center; border-bottom: 1px solid var(--border); width: 100%;">
+        <div class="badge badge-teal" style="margin-bottom: 16px;">Step into the Future</div>
+        <h2>The World's Most Human AI Assistant</h2>
+        <p>Nyx combines real-time voice, lifelike micro-expressions, and advanced client-side interactivity to redefine
+          how users interact with your website.</p>
+        <div style="margin-top: 32px; display: flex; gap: 12px;">
+          <button class="btn btn-purple" style="width: auto; padding: 12px 24px;">Get Started Free</button>
+          <button class="btn btn-ghost" style="width: auto; padding: 12px 24px;">View Documentation</button>
+        </div>
+      </section>
+
+      <!-- FEATURES / PRODUCTS SECTION -->
+      <section id="features"
+        style="padding: 60px 0; border-bottom: 1px solid var(--border); width: 100%; text-align: center;">
+        <div class="badge badge-purple" style="margin-bottom: 12px;">The Nyx Collection</div>
+        <h3 style="font-size: 24px; margin-bottom: 12px;">Curated Premium Hardware</h3>
+        <p style="color: var(--text-muted); max-width: 500px; margin: 0 auto 40px; font-size: 14px;">
+          Click a product below to send context to Nyx. Notice how she stays silent but updates her memory of what
+          you're viewing.
+        </p>
+
+        <div class="product-grid" style="max-width: 1000px; margin: 0 auto;">
+          <div class="product-card" data-name="Nike Air Max" data-price="120" data-sku="NK-AM-001">
+            <div class="product-emoji">👟</div>
+            <div class="product-name">Nike Air Max</div>
+            <div class="product-price">$120.00</div>
+          </div>
+          <div class="product-card" data-name="Sony WH-1000XM5" data-price="349" data-sku="SN-WH-XM5">
+            <div class="product-emoji">🎧</div>
+            <div class="product-name">Sony WH-1000XM5</div>
+            <div class="product-price">$349.00</div>
+          </div>
+          <div class="product-card" data-name="Apple Watch Ultra" data-price="799" data-sku="AP-WU-002">
+            <div class="product-emoji">⌚</div>
+            <div class="product-name">Apple Watch Ultra</div>
+            <div class="product-price">$799.00</div>
+          </div>
+          <!-- New Products -->
+          <div class="product-card" data-name="MacBook Pro M3" data-price="1999" data-sku="AP-MBP-M3">
+            <div class="product-emoji">💻</div>
+            <div class="product-name">MacBook Pro M3</div>
+            <div class="product-price">$1,999.00</div>
+          </div>
+          <div class="product-card" data-name="Logitech MX Master 3S" data-price="99" data-sku="LT-MX-3S">
+            <div class="product-emoji">🖱️</div>
+            <div class="product-name">Logitech MX Master 3S</div>
+            <div class="product-price">$99.00</div>
+          </div>
+          <div class="product-card" data-name="Keychron Q6 Pro" data-price="189" data-sku="KC-Q6-PRO">
+            <div class="product-emoji">⌨️</div>
+            <div class="product-name">Keychron Q6 Pro</div>
+            <div class="product-price">$189.00</div>
+          </div>
+          <!-- More Products added per request -->
+          <div class="product-card" data-name="iPad Pro M4" data-price="999" data-sku="AP-IPAD-M4">
+            <div class="product-emoji">📱</div>
+            <div class="product-name">iPad Pro M4</div>
+            <div class="product-price">$999.00</div>
+          </div>
+          <div class="product-card" data-name="Nintendo Switch OLED" data-price="349" data-sku="NT-SW-OLED">
+            <div class="product-emoji">🎮</div>
+            <div class="product-name">Switch OLED</div>
+            <div class="product-price">$349.00</div>
+          </div>
+          <div class="product-card" data-name="Dyson Airwrap" data-price="599" data-sku="DY-AIR-01">
+            <div class="product-emoji">✨</div>
+            <div class="product-name">Dyson Airwrap</div>
+            <div class="product-price">$599.00</div>
+          </div>
+        </div>
+
+        <!-- Product Details Container -->
+        <div id="product-details" style="display: none; max-width: 800px; margin: 40px auto 0; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; text-align: left; animation: fadeIn 0.3s ease;">
+          <div style="display: flex; gap: 20px; align-items: center; justify-content: space-between;">
+            <div style="display: flex; gap: 20px; align-items: center;">
+              <div id="pd-emoji" style="font-size: 60px; background: rgba(0,0,0,0.2); width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">👟</div>
+              <div>
+                <div id="pd-sku" style="font-size: 11px; color: #a69cff; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 4px;">SKU</div>
+                <div id="pd-name" style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Name</div>
+                <div id="pd-price" style="font-size: 18px; color: #4ecdc4; font-weight: 600; margin-bottom: 12px;">$Price</div>
+                <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; max-width: 300px;">This is a premium product in the Nyx collection. Experience the next generation of quality and design.</p>
+              </div>
+            </div>
+            <!-- 3D Model Viewer -->
+            <model-viewer id="product-3d-model" 
+              src="/asset/models/shoe.glb" 
+              alt="A 3D model of a product" 
+              camera-controls 
+              style="width: 250px; height: 250px; background: rgba(0,0,0,0.2); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
+            </model-viewer>
+          </div>
+        </div>
+      </section>
+
+      <!-- PRICING SECTION -->
+      <section id="pricing"
+        style="padding: 60px 0; border-bottom: 1px solid var(--border); width: 100%; text-align: center;">
+        <div class="badge badge-green" style="margin-bottom: 12px;">Pricing Plans</div>
+        <h3 style="font-size: 24px; margin-bottom: 32px;">Scale as you grow</h3>
+
+        <div
+          style="display: flex; justify-content: center; width: 100%; flex-direction: column; align-items: center; gap: 20px;">
+          <div id="richDemo" style="margin: 0; display: none; width: 100%; max-width: 600px;">
+            <div
+              style="background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; animation: fadeIn 0.5s ease;">
+              <h4 style="font-size: 13px; margin-bottom: 12px; color: #a69cff; text-align: left;">📊 Comparison Table
+              </h4>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">Basic</div>
+                  <div style="font-size: 18px; font-weight: 700; color: #4ecdc4; margin-bottom: 8px;">Free</div>
+                  <ul style="list-style: none; padding: 0; margin: 0; text-align: left;">
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• Core AI</li>
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• Web Chat</li>
+                  </ul>
+                </div>
+                <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">Growth</div>
+                  <div style="font-size: 18px; font-weight: 700; color: #4ecdc4; margin-bottom: 8px;">$29</div>
+                  <ul style="list-style: none; padding: 0; margin: 0; text-align: left;">
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• Real-time Voice</li>
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• Rich UI</li>
+                  </ul>
+                </div>
+                <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">Scale</div>
+                  <div style="font-size: 18px; font-weight: 700; color: #4ecdc4; margin-bottom: 8px;">$99</div>
+                  <ul style="list-style: none; padding: 0; margin: 0; text-align: left;">
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• Custom Agents</li>
+                    <li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• SSO</li>
+                  </ul>
+                </div>
+              </div>
+              <div style="margin-top: 12px;">
+                <button class="btn-demo secondary" style="width: 100%; pointer-events: auto;"
+                  onclick="document.getElementById('richDemo').style.display='none'">Dismiss Table</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CONTACT SECTION -->
+      <section id="contact_us"
+        style="padding: 100px 0; width: 100%; text-align: center; background: rgba(108, 99, 255, 0.03);">
+        <div class="badge badge-red" style="margin-bottom: 12px;">Contact</div>
+        <h3 style="font-size: 24px; margin-bottom: 16px;">Have a specific question?</h3>
+        <p style="color: var(--text-muted); max-width: 500px; margin: 0 auto 32px;">Ask Nyx directly by clicking the
+          chat bubble, or use the form below.</p>
+
+        <div
+          style="max-width: 500px; margin: 0 auto; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 32px; text-align: left;">
+          <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+            <div style="flex: 1;">
+              <label
+                style="display: block; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">First
+                Name</label>
+              <input type="text" placeholder="Jane"
+                style="width: 100%; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; color: white; font-family: inherit; transition: border-color 0.2s, background 0.2s;"
+                onfocus="this.style.borderColor='var(--primary)'; this.style.background='rgba(0,0,0,0.3)'"
+                onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='var(--bg)'">
+            </div>
+            <div style="flex: 1;">
+              <label
+                style="display: block; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">Last
+                Name</label>
+              <input type="text" placeholder="Doe"
+                style="width: 100%; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; color: white; font-family: inherit; transition: border-color 0.2s, background 0.2s;"
+                onfocus="this.style.borderColor='var(--primary)'; this.style.background='rgba(0,0,0,0.3)'"
+                onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='var(--bg)'">
+            </div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label
+              style="display: block; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">Email
+              Address</label>
+            <input type="email" placeholder="you@company.com"
+              style="width: 100%; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; color: white; font-family: inherit; transition: border-color 0.2s, background 0.2s;"
+              onfocus="this.style.borderColor='var(--primary)'; this.style.background='rgba(0,0,0,0.3)'"
+              onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='var(--bg)'">
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label
+              style="display: block; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">Inquiry
+              Type</label>
+            <select
+              style="width: 100%; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; color: white; font-family: inherit; appearance: none; cursor: pointer; transition: border-color 0.2s, background 0.2s;"
+              onfocus="this.style.borderColor='var(--primary)'; this.style.background='rgba(0,0,0,0.3)'"
+              onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='var(--bg)'">
+              <option value="sales">Sales & Pricing</option>
+              <option value="support">Technical Support</option>
+              <option value="partnership">Partnerships</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 24px;">
+            <label
+              style="display: block; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px; font-weight: 600;">Message</label>
+            <textarea placeholder="How can we help you today?"
+              style="width: 100%; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; color: white; font-family: inherit; height: 100px; resize: vertical; transition: border-color 0.2s, background 0.2s;"
+              onfocus="this.style.borderColor='var(--primary)'; this.style.background='rgba(0,0,0,0.3)'"
+              onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='var(--bg)'"></textarea>
+          </div>
+
+          <button class="btn btn-purple"
+            style="width: 100%; padding: 14px; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0; cursor: pointer; transition: background 0.2s, transform 0.1s;"
+            onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'"
+            onmouseleave="this.style.transform='scale(1)'">Send Message</button>
+        </div>
+      </section>
+
+      <!-- FOOTER NAVIGATION -->
+      <footer id="bottom" style="width: 100%; padding: 40px 0 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+        <div style="display: flex; gap: 32px;">
+          <a href="#home" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Home</a>
+          <a href="#features" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Products</a>
+          <a href="#pricing" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Pricing</a>
+          <a href="#contact_us" style="color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">Contact</a>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); opacity: 0.5;">&copy; 2026 Nyx Demo</div>
+      </footer>
+    </main>
+  </div>
+
   <script type="module">
     import AvatarChat from './src/widget.ts';
 
-    // Initialize widget
-    const widget = AvatarChat.init({
-      container: document.body,
-      serverUrl: 'ws://localhost:8080/ws',
-      avatarUrl: '/asset/nyx.zip',
-      position: 'bottom-right',
-      width: 360,
-      height: 520,
-      logLevel: 'debug',
-      suggestions: [
-        'What is your story?',
-        'What services do you provide?',
-        'Can I book a meeting?',
-      ],
-      tooltipText: 'Hi! 👋 Ask me anything about Myned AI.',
-      primaryColor: '#204959',      // User bubbles, suggestions, accents
-      secondaryColor: '#204959',
+    // ── Init state ─────────────────────────────────────────────────────────────
+    let handleRichContentLocally = true;
+    let widget = null;
+
+    function initWidget() {
+      logEvent('Widget', `Initializing (Mode: ${handleRichContentLocally ? 'Internal' : 'External'})`);
+
+      widget = AvatarChat.init({
+        container: document.body,
+        serverUrl: 'ws://localhost:8080/ws',
+        avatarUrl: '/asset/nyx.zip',
+        position: 'bottom-right',
+        width: 360,
+        height: 520,
+        startCollapsed: false,
+        logLevel: 'info',
+        primaryColor: '#6c63ff',
+        secondaryColor: '#1a1d27',
+        handleRichContentLocally: handleRichContentLocally,
+        suggestions: [
+          'What products do you have?',
+          'Show me pricing plans',
+          'Help me with this page',
+        ],
+        tooltipText: 'Hi! 👋 I can help you explore this demo.',
+
+        // clientContext is sent as a 'client_init_config' event when the
+        // WebSocket connects. The AI reads it silently and adapts accordingly.
+        clientContext: {
+          navigation_sections: ['top', 'home', 'pricing', 'contact_us', 'bottom'],
+          page_topic: 'Feature Demo — Avatar Chat Widget',
+          user_tier: 'Developer',
+        }
+      });
+
+      // 1. Product Spotlight Renderer
+      widget.registerRichRenderer('product_spotlight', (payload, container) => {
+        container.style.padding = '12px 0';
+        container.innerHTML = `
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(108, 99, 255, 0.3); border-radius: 12px; overflow: hidden; animation: slideIn 0.4s ease-out;">
+            <div style="height: 120px; background: linear-gradient(135deg, #1a1d27, #232637); display: flex; align-items: center; justify-content: center; font-size: 50px;">
+              ${payload.emoji || '📦'}
+            </div>
+            <div style="padding: 16px;">
+              <div style="font-size: 10px; color: #6c63ff; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Featured Product</div>
+              <div style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">${payload.name}</div>
+              <div style="font-size: 14px; color: #4ecdc4; font-weight: 600; margin-bottom: 12px;">$${payload.price}</div>
+              <button style="width: 100%; background: #6c63ff; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; pointer-events: auto;" onmouseover="this.style.opacity=0.9" onmouseout="this.style.opacity=1">Add to Cart</button>
+              <button class="btn-demo secondary dismiss-btn" style="width: 100%; margin-top: 8px; pointer-events: auto;">Dismiss</button>
+            </div>
+          </div>
+          <style>
+            @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          </style>
+        `;
+        container.querySelector('.dismiss-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          container.remove();
+          logEvent('rich_content:dismiss', 'local');
+        });
+      });
+
+      // 2. Pricing Table Renderer (with clickable detail view)
+      widget.registerRichRenderer('pricing_table', (payload, container) => {
+        const plans = payload.plans || [
+          { name: 'Starter', price: 'Free', features: ['100 sessions', 'Chat only'] },
+          { name: 'Pro', price: '$49', features: ['Unlimited', 'Voice', 'Rich Content'] }
+        ];
+
+        container.style.padding = '12px 0';
+        container.innerHTML =
+          '<div style="background: rgba(108, 99, 255, 0.05); border: 1px solid rgba(108, 99, 255, 0.2); border-radius: 12px; padding: 16px; animation: fadeIn 0.5s ease;">' +
+            '<h4 style="font-size: 13px; margin-bottom: 12px; color: #a69cff;">📊 Comparison Table</h4>' +
+            '<div style="display: grid; grid-template-columns: repeat(' + plans.length + ', 1fr); gap: 10px;">' +
+              plans.map(function(plan, i) {
+                return '<div data-plan-index="' + i + '" style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; pointer-events: auto; transition: all 0.2s ease; border: 2px solid transparent;">' +
+                  '<div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">' + plan.name + '</div>' +
+                  '<div style="font-size: 18px; font-weight: 700; color: #4ecdc4; margin-bottom: 8px;">' + plan.price + '</div>' +
+                  '<ul style="list-style: none; padding: 0; margin: 0; text-align: left;">' +
+                    plan.features.slice(0, 3).map(function(f) { return '<li style="font-size: 10px; color: #8b8fa8; margin-bottom: 4px;">• ' + f + '</li>'; }).join('') +
+                  '</ul>' +
+                '</div>';
+              }).join('') +
+            '</div>' +
+            '<div data-plan-detail style="display: none; margin-top: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(78, 205, 196, 0.3); border-radius: 10px; padding: 16px;"></div>' +
+            '<div style="margin-top: 12px;">' +
+              '<button data-dismiss style="width: 100%; pointer-events: auto; padding: 9px 14px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; background: rgba(255,255,255,0.04); color: #8b8fa8; font-size: 12.5px; cursor: pointer;">Dismiss Recommendation</button>' +
+            '</div>' +
+          '</div>';
+
+        // Event delegation: single click handler on container
+        var selectedIndex = -1;
+        container.addEventListener('click', function(e) {
+          // Dismiss button
+          var target = e.target;
+          if (target.hasAttribute('data-dismiss') || target.closest('[data-dismiss]')) {
+            container.remove();
+            logEvent('rich_content:dismiss', 'local');
+            return;
+          }
+
+          // Plan card click (find the card with data-plan-index)
+          var card = target.closest('[data-plan-index]');
+          if (!card) return;
+
+          var idx = parseInt(card.getAttribute('data-plan-index'), 10);
+          var plan = plans[idx];
+          if (!plan) return;
+
+          var detailEl = container.querySelector('[data-plan-detail]');
+
+          // Toggle: clicking the same plan again hides the detail
+          if (selectedIndex === idx) {
+            selectedIndex = -1;
+            card.style.borderColor = 'transparent';
+            if (detailEl) detailEl.style.display = 'none';
+            return;
+          }
+          selectedIndex = idx;
+
+          // Highlight selected card, reset others
+          container.querySelectorAll('[data-plan-index]').forEach(function(c) {
+            c.style.borderColor = 'transparent';
+          });
+          card.style.borderColor = '#4ecdc4';
+
+          // Build detail view
+          if (detailEl) {
+            var allFeatures = (plan.features || []).map(function(f) {
+              return '<li style="padding: 3px 0; font-size: 11px; color: #c8cad4;">✓ ' + f + '</li>';
+            }).join('');
+
+            detailEl.innerHTML =
+              '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">' +
+                '<div>' +
+                  '<div style="font-size: 14px; font-weight: 700; color: #e8eaf0;">' + plan.name + '</div>' +
+                  '<div style="font-size: 20px; font-weight: 700; color: #4ecdc4; margin-top: 2px;">' + plan.price + '</div>' +
+                '</div>' +
+                '<div style="font-size: 10px; color: #6c63ff; font-weight: 600; text-transform: uppercase; background: rgba(108,99,255,0.15); padding: 4px 8px; border-radius: 12px;">Selected</div>' +
+              '</div>' +
+              (plan.description ? '<div style="font-size: 12px; color: #8b8fa8; margin-bottom: 10px; line-height: 1.5;">' + plan.description + '</div>' : '') +
+              (allFeatures ? '<div style="margin-bottom: 6px;"><div style="font-size: 10px; font-weight: 600; color: #a69cff; text-transform: uppercase; margin-bottom: 6px;">All Features</div><ul style="list-style: none; padding: 0; margin: 0;">' + allFeatures + '</ul></div>' : '');
+            detailEl.style.display = 'block';
+          }
+
+          // Silently send product interest to agent context (no response, no display)
+          widget.sendEvent('product_interest', {
+            product_name: plan.name,
+            product_price: plan.price,
+            product_features: plan.features,
+            product_description: plan.description || null,
+            interaction: 'clicked_in_table'
+          }, { directive: 'context' });
+
+          logEvent('product_interest:' + plan.name, 'context (silent)');
+        });
+      });
+
+      // 3. Link Card Renderer with Dynamic Thumbnail Generation
+      widget.registerRichRenderer('link_card', (payload, container) => {
+        container.style.padding = '12px 0';
+        const cardId = 'link-card-' + Date.now();
+
+        container.innerHTML = `
+          <div class="link-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(108, 99, 255, 0.3); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; animation: slideIn 0.4s ease-out;">
+            <div id="${cardId}-thumb" style="width: 100%; height: 140px; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px;">
+              Loading preview...
+            </div>
+            <div style="padding: 16px;">
+              <h4 style="font-size: 15px; margin-bottom: 6px; font-weight: 600;">${payload.title}</h4>
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">${payload.description}</p>
+              <a href="${payload.url}" target="_blank" style="display: block; text-align: center; background: var(--accent); color: white; padding: 10px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500; transition: background 0.2s; pointer-events: auto;">Visit Link</a>
+              <button class="btn-demo secondary dismiss-btn" style="width: 100%; margin-top: 8px; pointer-events: auto;">Dismiss</button>
+            </div>
+          </div>
+        `;
+
+        // Asynchronously generate/fetch the thumbnail
+        const thumbDiv = container.querySelector(`#${cardId}-thumb`);
+        if (payload.thumbnail) {
+          thumbDiv.style.backgroundImage = `url('${payload.thumbnail}')`;
+          thumbDiv.style.backgroundSize = 'cover';
+          thumbDiv.style.backgroundPosition = 'center';
+          thumbDiv.innerHTML = '';
+        } else {
+          // Use Microlink API to fetch a screenshot of the site dynamically
+          fetch(`https://api.microlink.io?url=${encodeURIComponent(payload.url)}&screenshot=true`)
+            .then(res => res.json())
+            .then(data => {
+              if (data.status === 'success') {
+                const imgUrl = data.data.screenshot?.url || data.data.image?.url;
+                if (imgUrl) {
+                  const isScreenshot = !!data.data.screenshot?.url;
+                  thumbDiv.style.backgroundImage = `url('${imgUrl}')`;
+                  thumbDiv.style.backgroundSize = isScreenshot ? 'cover' : 'contain';
+                  thumbDiv.style.backgroundRepeat = 'no-repeat';
+                  thumbDiv.style.backgroundPosition = isScreenshot ? 'top center' : 'center';
+                  if (!isScreenshot) thumbDiv.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                  thumbDiv.innerHTML = '';
+                } else {
+                  thumbDiv.innerHTML = 'No preview available';
+                }
+              } else {
+                thumbDiv.innerHTML = 'No preview available';
+              }
+            })
+            .catch(() => {
+              thumbDiv.innerHTML = 'Preview unavailable';
+            });
+        }
+
+        container.querySelector('.dismiss-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          container.remove();
+          logEvent('rich_content:dismiss', 'local');
+        });
+      });
+    }
+
+    // Initial setup
+    initWidget();
+
+    // ── Mode Toggle ───────────────────────────────────────────────────────────
+    document.querySelectorAll('input[name="richMode"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        handleRichContentLocally = e.target.value === 'local';
+        initWidget();
+      });
     });
 
-    // Listen for AI Actions
-    window.addEventListener('nyxAction', (e) => {
-      const { function_name, arguments: args } = e.detail;
-      console.log('Main Page received nyxAction:', function_name, args);
+    // ── External Event Listener ───────────────────────────────────────────────
+    window.addEventListener('nyxRichContent', (e) => {
+      const item = e.detail;
+      logEvent(`EXT: ${item.type}`, 'external handling triggered');
 
-      if (function_name === 'trigger_confetti') {
-        confetti({
-          particleCount: 150,
-          spread: 80,
-          origin: { y: 0.6 }
-        });
+      // If the host site wants to deal with it, e.g. show an alert or a modal
+      if (item.type === 'pricing_table' && !handleRichContentLocally) {
+        console.warn('[Demo] Site intercepts pricing table:', item.payload);
+        const table = document.getElementById('richDemo');
+        table.style.display = 'block';
+        table.scrollIntoView({ behavior: 'smooth' });
       }
 
+      if (item.type === 'link_card' && !handleRichContentLocally) {
+        console.warn('[Demo] Site intercepts link card:', item.payload);
+        const container = document.getElementById('idRichSpotlight');
+        const d = item.payload;
+        const cardId = 'ext-link-' + Date.now();
 
+        container.innerHTML = `
+          <div class="link-card" style="background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; max-width: 300px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <div id="${cardId}-thumb" style="width: 100%; height: 160px; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px;">
+              Loading preview...
+            </div>
+            <div style="padding: 16px;">
+              <h4 style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">${d.title}</h4>
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5;">${d.description}</p>
+              <a href="${d.url}" target="_blank" style="display: block; text-align: center; background: var(--accent); color: white; padding: 10px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500; transition: background 0.2s;">Visit Link</a>
+              <button class="btn-demo secondary" onclick="document.getElementById('idRichSpotlight').style.display = 'none'" style="width: 100%; margin-top: 8px;">Close Overlay</button>
+            </div>
+          </div>
+        `;
+
+        // Asynchronously generate/fetch the thumbnail
+        const thumbDiv = container.querySelector(`#${cardId}-thumb`);
+        if (d.thumbnail) {
+          thumbDiv.style.backgroundImage = `url('${d.thumbnail}')`;
+          thumbDiv.style.backgroundSize = 'cover';
+          thumbDiv.style.backgroundPosition = 'center';
+          thumbDiv.innerHTML = '';
+        } else {
+          // Use Microlink API to fetch a screenshot of the site dynamically
+          fetch(`https://api.microlink.io?url=${encodeURIComponent(d.url)}&screenshot=true`)
+            .then(res => res.json())
+            .then(data => {
+              if (data.status === 'success') {
+                const imgUrl = data.data.screenshot?.url || data.data.image?.url;
+                if (imgUrl) {
+                  const isScreenshot = !!data.data.screenshot?.url;
+                  thumbDiv.style.backgroundImage = `url('${imgUrl}')`;
+                  thumbDiv.style.backgroundSize = isScreenshot ? 'cover' : 'contain';
+                  thumbDiv.style.backgroundRepeat = 'no-repeat';
+                  thumbDiv.style.backgroundPosition = isScreenshot ? 'top center' : 'center';
+                  if (!isScreenshot) thumbDiv.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                  thumbDiv.innerHTML = '';
+                } else {
+                  thumbDiv.innerHTML = 'No preview available';
+                }
+              } else {
+                thumbDiv.innerHTML = 'No preview available';
+              }
+            })
+            .catch(() => {
+              thumbDiv.innerHTML = 'Preview unavailable';
+            });
+        }
+
+        container.style.display = 'flex';
+      }
     });
 
-    // Setup debug button
-    // document.getElementById('confettiBtn').addEventListener('click', () => {
-    //   widget.triggerAction('trigger_confetti', {});
-    // });
+    // ── Connection status indicator ───────────────────────────────────────────
+    const connDot = document.getElementById('connDot');
+    const connLabel = document.getElementById('connLabel');
+
+    // The widget dispatches 'nyxAction' for AI-initiated calls.
+    // We detect an initial server handshake message to know we're connected.
+    // As a simpler approach, we ping the indicator via a small polling check.
+    // If the widget exposes a connection event in the future, swap this out.
+
+    // Poll widget connection state every 500ms and update the badge
+    setInterval(() => {
+      if (widget && widget.isConnected()) {
+        markConnected();
+      }
+    }, 1000);
+
+    // Listen for any incoming server message as a proxy for "connected"
+    window.addEventListener('nyxAction', () => markConnected());
+    window.addEventListener('nyxTranscript', () => markConnected());
+
+    // Also detect the first nyxAction or 3 seconds after load
+    setTimeout(() => markConnected(), 3000);
+
+    function markConnected() {
+      if (!connDot) return;
+      connDot.className = 'conn-dot connected';
+      connLabel.textContent = '● Connected to Nyx server';
+      connLabel.style.color = '#50c878';
+    }
+
+    // ── nyxAction handler ─────────────────────────────────────────────────────
+    window.addEventListener('nyxAction', (e) => {
+      const { function_name, arguments: args } = e.detail;
+      logEvent(function_name, 'action');
+
+      if (function_name === 'trigger_confetti') {
+        confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+      }
+      if (function_name === 'rotate_3d_model') {
+        const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+        const direction = parsedArgs?.direction;
+        const viewer = document.getElementById('product-3d-model');
+        if (viewer) {
+          console.log('[Demo] Rotating 3D model:', direction);
+          switch(direction) {
+            case 'front': viewer.setAttribute('camera-orbit', '0deg 75deg 105%'); break;
+            case 'back': viewer.setAttribute('camera-orbit', '180deg 75deg 105%'); break;
+            case 'left': viewer.setAttribute('camera-orbit', '-90deg 75deg 105%'); break;
+            case 'right': viewer.setAttribute('camera-orbit', '90deg 75deg 105%'); break;
+            case 'up': viewer.setAttribute('camera-orbit', '0deg 0deg 105%'); break;
+            case 'down': viewer.setAttribute('camera-orbit', '0deg 180deg 105%'); break;
+          }
+        }
+      }
+      if (function_name === 'navigate_to_section') {
+        const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+        let sectionId = parsedArgs?.section_id;
+
+        // Fallbacks for common AI guesses
+        if (sectionId === 'top') sectionId = 'home';
+        if (sectionId === 'contact' || sectionId === 'contact-form') sectionId = 'contact_us';
+
+        console.log('[Demo] AI Navigate to:', sectionId);
+        const el = document.getElementById(sectionId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+          // Highlight the section briefly
+          el.style.outline = '2px solid #6c63ff';
+          setTimeout(() => el.style.outline = 'none', 2000);
+        } else {
+          console.warn('[Demo] Failed to find section to navigate to:', sectionId);
+        }
+      }
+    });
+
+    // ── Product cards ─────────────────────────────────────────────────────────
+    // Clicking a card fires a silent 'viewing_product' context event.
+    // The AI silently absorbs the product data. If you then ask "tell me more",
+    // it already knows which product you're looking at.
+    document.querySelectorAll('.product-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.product-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        const data = { name: card.dataset.name, price: +card.dataset.price, sku: card.dataset.sku };
+        
+        // Show product details
+        const detailsContainer = document.getElementById('product-details');
+        const viewer = document.getElementById('product-3d-model');
+        if (detailsContainer) {
+          document.getElementById('pd-emoji').textContent = card.querySelector('.product-emoji').textContent;
+          document.getElementById('pd-sku').textContent = data.sku || 'N/A';
+          document.getElementById('pd-name').textContent = data.name;
+          document.getElementById('pd-price').textContent = '$' + card.dataset.price;
+          
+          if (viewer) {
+            const modelPaths = {
+              'NK-AM-001': '/asset/models/shoe.glb',
+              'SN-WH-XM5': '/asset/models/headphones.glb',
+              'AP-WU-002': '/asset/models/apple-watch-ultra.glb',
+              'AP-MBP-M3': '/asset/models/macbook-pro.glb',
+              'LT-MX-3S': '/asset/models/logitech-mouse.glb',
+              'KC-Q6-PRO': '/asset/models/keychron-keyboard.glb',
+              'AP-IPAD-M4': '/asset/models/ipad-pro.glb',
+              'NT-SW-OLED': '/asset/models/nintendo-switch.glb',
+              'DY-AIR-01': '/asset/models/dyson-airwrap.glb'
+            };
+            // Fallback to the Nike shoe if the local asset hasn't been uploaded yet, to prevent a blank preview
+            viewer.src = modelPaths[data.sku] || '/asset/models/shoe.glb';
+            viewer.cameraOrbit = 'auto auto auto'; // Reset rotation orbit
+          }
+          detailsContainer.style.display = 'block';
+          detailsContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        widget.sendEvent('viewing_product', data, { directive: 'context' });
+        logEvent('viewing_product', 'context');
+      });
+    });
+
+    // ── Rich Renderers ───────────────────────────────────────────────────────
+    
+    // Register the pricing table renderer specific to this demo site
+    widget.registerRichRenderer('pricing_table', null, (payload, container) => {
+      const plans = Array.isArray(payload.plans) ? payload.plans : [];
+      const cardsHtml = plans.map((plan) => {
+        const features = Array.isArray(plan.features)
+          ? plan.features.map((f) => `<li style="padding:3px 0; font-size:12px; color:#475569;">✓ ${f}</li>`).join('')
+          : '';
+        return `
+          <div style="flex:1; min-width:120px; max-width:180px; border:1px solid #e2e8f0; border-radius:10px; padding:14px; background:white; text-align:center; font-family:sans-serif;">
+            <div style="font-weight:600; font-size:14px; color:#1e293b; margin-bottom:4px;">${plan.name || ''}</div>
+            <div style="font-size:20px; font-weight:700; color:#6366f1; margin-bottom:8px;">${plan.price || ''}</div>
+            <ul style="list-style:none; padding:0; margin:0; text-align:left;">${features}</ul>
+          </div>
+        `;
+      }).join('');
+      container.innerHTML = `<div style="display:flex; gap:8px; margin-top:8px; overflow-x:auto;">${cardsHtml}</div>`;
+    });
+
+    // ── Sidebar buttons ───────────────────────────────────────────────────────
+
+    // context: silent — AI does NOT respond, just stores the info
+    document.getElementById('btnContext').addEventListener('click', () => {
+      widget.sendEvent('page_view', { url: window.location.href, title: document.title }, { directive: 'context' });
+      logEvent('page_view', 'context');
+    });
+
+    // speak: AI SHOULD respond immediately — watch the widget!
+    document.getElementById('btnSpeak').addEventListener('click', () => {
+      widget.sendEvent('promo_ended', { code: 'DEMO2026', discount: '20%' }, { directive: 'speak' });
+      logEvent('promo_ended', 'speak ← AI should respond now');
+    });
+
+    document.getElementById('btnPayFail').addEventListener('click', () => {
+      widget.sendEvent('payment_failed', { reason: 'insufficient_funds', amount: 120.00 }, { directive: 'speak' });
+      logEvent('payment_failed', 'speak ← AI should respond now');
+    });
+
+    document.getElementById('btnLinkCard').addEventListener('click', () => {
+      // We instruct the AI directly via a system event to send us a link card.
+      const instructions = "Send the user a send_rich_content card with content_type 'link_card'. Keep your spoken response brief like 'Here is the link you requested!'. payload_json MUST contain: title (MyNed AI), description (The future of conversational interfaces), url (https://myned.ai). Do NOT provide a thumbnail URL.";
+      widget.sendEvent('send_link_card_demo', { instructions: instructions }, { directive: 'trigger' });
+      logEvent('send_link_card_demo', 'trigger ← AI should send card now');
+    });
+
+    // Rich content — Now uses the actual triggerAction bridge!
+    document.getElementById('btnRichPricing').addEventListener('click', () => {
+      const payload = {
+        plans: [
+          { name: 'Basic', price: 'Free', features: ['Core AI', 'Web Chat'] },
+          { name: 'Growth', price: '$29', features: ['Real-time Voice', 'Rich UI'] },
+          { name: 'Scale', price: '$99', features: ['Custom Agents', 'SSO'] }
+        ]
+      };
+      // Manually trigger the action as if the AI did it
+      widget.triggerAction('send_rich_content', {
+        item_id: 'pricing_demo_' + Date.now(),
+        content_type: 'pricing_table',
+        action: 'replace',
+        payload_json: JSON.stringify(payload)
+      });
+      logEvent('send_rich_content', 'debug: price_table');
+    });
+
+    document.getElementById('idRichSpotlight').addEventListener('click', () => {
+      widget.triggerAction('send_rich_content', {
+        item_id: 'spotlight_demo_' + Date.now(),
+        content_type: 'product_spotlight',
+        action: 'replace',
+        payload_json: JSON.stringify({
+          name: 'Nyx Pro 2026',
+          price: '299.99',
+          emoji: '🚀',
+          description: 'The ultimate AI companion for your workspace.'
+        })
+      });
+      logEvent('send_rich_content', 'debug: spotlight');
+    });
+
+    // Confetti — fires locally, no server needed
+    document.getElementById('btnConfetti').addEventListener('click', () => {
+      confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+      logEvent('trigger_confetti', 'action');
+    });
+
+    document.getElementById('btnNavContact').addEventListener('click', () => {
+      widget.triggerAction('navigate_to_section', { section_id: 'contact_us' });
+      logEvent('navigate_to_section', 'debug: contact_us');
+    });
+    document.getElementById('btnNavTop').addEventListener('click', () => {
+      widget.triggerAction('navigate_to_section', { section_id: 'home' });
+      logEvent('navigate_to_section', 'debug: home');
+    });
+
+    // ── Event log ─────────────────────────────────────────────────────────────
+    function logEvent(name, directive) {
+      const log = document.getElementById('eventLog');
+      if (!log) return;
+
+      const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+
+      const color = directive === 'action' || name.startsWith('EXT') ? '#ff6b6b'
+        : directive?.startsWith('speak') ? '#a69cff'
+          : directive === 'server→client' || directive?.includes('debug') || directive?.includes('Mode') ? '#50c878'
+            : '#4ecdc4';
+
+      entry.innerHTML = `<span class="log-ts">${ts}</span>
+        <span class="log-name"> ${name}</span>&nbsp;
+        <span style="color:${color}">[${directive}]</span>`;
+      log.insertBefore(entry, log.firstChild);
+      while (log.children.length > 25) log.removeChild(log.lastChild);
+    }
   </script>
 </body>
 
