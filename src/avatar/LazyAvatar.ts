@@ -16,7 +16,11 @@ const log = logger.scope('LazyAvatar');
 /**
  * Type for GaussianAvatar constructor (ensures type safety on dynamic import)
  */
-type GaussianAvatarConstructor = new (container: HTMLDivElement, assetsPath: string) => IAvatarController & {
+type GaussianAvatarConstructor = new (
+  container: HTMLDivElement,
+  assetsPath: string,
+  backgroundImage?: string,
+) => IAvatarController & {
   start?: () => Promise<void> | void;
 };
 
@@ -29,6 +33,8 @@ export interface LazyAvatarOptions {
   onError?: (error: Error) => void;
   /** Show loading indicator */
   onLoadingStart?: () => void;
+  /** Background image URL drawn behind the avatar inside the 3D scene */
+  backgroundImage?: string;
 }
 
 /**
@@ -195,7 +201,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._removePlaceholder();
       
       // Create the actual avatar (now properly typed)
-      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath);
+      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath, this._options.backgroundImage);
       
       // Start rendering if the avatar has a start method
       if (this._avatar.start) {

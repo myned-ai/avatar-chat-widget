@@ -1,4 +1,5 @@
 import * as GaussianSplats3D from "@myned-ai/gsplat-flame-avatar-renderer"
+import { TextureLoader, SRGBColorSpace, Object3D, type Scene } from 'three';
 import { createNeutralWeights } from '../constants/arkit';
 import { logger } from '../utils/Logger';
 import type { Disposable, ChatState } from '../types/common';
@@ -37,6 +38,7 @@ const BLINK_INTERVALS: Record<ChatState, [number, number]> = {
 export class GaussianAvatar implements Disposable {
   private _avatarDivEle: HTMLDivElement;
   private _assetsPath = "";
+  private _backgroundImage?: string;
   public curState: ChatState = "Idle";
   private _renderer!: GaussianSplats3D.GaussianSplatRenderer;
   private forceEyesClosed = false;
@@ -52,9 +54,10 @@ export class GaussianAvatar implements Disposable {
   private blinkIntensity = 1.0;
   private lastBlinkFrameTime = 0; // For frame timing at 30fps
   
-  constructor(container: HTMLDivElement, assetsPath: string) {
+  constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
     this._avatarDivEle = container;
     this._assetsPath = assetsPath;
+    this._backgroundImage = backgroundImage;
     // Initialize neutral blendshapes using centralized constants
     this.neutralBlendshapes = createNeutralWeights();
     this._init();
@@ -87,11 +90,56 @@ export class GaussianAvatar implements Disposable {
         backgroundColor: "0xffffff"
       },
     );
-    
+
+    if (this._backgroundImage) {
+      this._applySceneBackground(this._backgroundImage);
+    }
+
     this.startTime = performance.now() / 1000;
     // Initial state is 'Idle' - ChatManager will set appropriate states based on conversation
     // State flow: Idle → Hello (user interaction) → Responding (AI speaks) → Idle
     log.info('Avatar ready, initial state:', this.curState);
+  }
+
+  /**
+   * Set the scene background to an image. Replaces the renderer's white clear color
+   * so the photo shows behind the splats instead of being covered by the canvas.
+   *
+   * The renderer (gsplat-flame-avatar-renderer) skips the threeScene render entirely
+   * when threeScene has no visible children, so we also add a dummy Object3D to force
+   * the scene-render path to run — that's what actually paints scene.background.
+   */
+  private _applySceneBackground(url: string): void {
+    try {
+      // Runtime scene is `viewer.threeScene` (the .d.ts file mislabels it as `scene`)
+      const viewer = this._renderer?.viewer as unknown as { threeScene?: Scene; forceRenderNextFrame?: () => void } | undefined;
+      const scene = viewer?.threeScene;
+      if (!scene) {
+        log.warn('Cannot apply scene background: viewer.threeScene not available');
+        return;
+      }
+
+      // Force hasRenderables() to return true so the renderer takes the scene-render path
+      if (!scene.children.some((c) => c.userData?.__bgAnchor)) {
+        const anchor = new Object3D();
+        anchor.userData.__bgAnchor = true;
+        scene.add(anchor);
+      }
+
+      new TextureLoader().load(
+        url,
+        (texture) => {
+          texture.colorSpace = SRGBColorSpace;
+          scene.background = texture;
+          viewer?.forceRenderNextFrame?.();
+          log.debug('Scene background applied');
+        },
+        undefined,
+        (err) => log.warn('Failed to load scene background image', { url, err }),
+      );
+    } catch (err) {
+      log.warn('applySceneBackground failed', err);
+    }
   }
 
   /**

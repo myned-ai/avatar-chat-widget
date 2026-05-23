@@ -296,6 +296,9 @@ class AvatarChatElement extends HTMLElement {
         resolvedAvatarUrl,
         {
           preload: false, // Changed: defer loading for better Core Web Vitals
+          backgroundImage: this.config.backgroundImage
+            ? this.resolveAssetUrl(this.config.backgroundImage)
+            : undefined,
           onReady: () => log.info('Avatar loaded'),
           onError: (err) => {
             log.error('Avatar load error:', err);
@@ -638,6 +641,21 @@ class AvatarChatElement extends HTMLElement {
     if (overrides.length === 0) return '';
 
     return `:host { ${overrides.join(' ')} }`;
+  }
+
+  /**
+   * Resolve a relative asset path against the configured/detected assets base URL.
+   * Absolute URLs are returned unchanged.
+   */
+  private resolveAssetUrl(url: string): string {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//') || url.startsWith('data:')) {
+      return url;
+    }
+    const base = this.config.assetsBaseUrl || detectAssetsBaseUrl();
+    if (base) {
+      return `${base.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+    }
+    return url;
   }
 
   /**
@@ -1080,6 +1098,16 @@ export const AvatarChat = {
       // Prevent path traversal attacks
       if (config.avatarUrl.includes('..')) {
         throw new Error('AvatarChat.init(): avatarUrl cannot contain path traversal');
+      }
+    }
+
+    // Validate backgroundImage if provided
+    if (config.backgroundImage !== undefined) {
+      if (typeof config.backgroundImage !== 'string') {
+        throw new Error('AvatarChat.init(): backgroundImage must be a string');
+      }
+      if (config.backgroundImage.includes('..')) {
+        throw new Error('AvatarChat.init(): backgroundImage cannot contain path traversal');
       }
     }
 
