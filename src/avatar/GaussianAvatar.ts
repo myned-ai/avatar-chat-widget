@@ -112,6 +112,38 @@ const PAUSE_RMS_EMA_ALPHA = 0.4;     // strong smoothing; new samples at 30 Hz
 const RESPONDING_FLUENT_RETURN_PROB = 0.85;
 const RESPONDING_PAUSE_RETURN_PROB  = 0.25;
 
+// ─── Procedural neck/head sway ──────────────────────────────────────────────
+// Multi-sine "idle motion" recipe transposed from privacypuppet (MIT). Two
+// detuned sinusoids per axis avoid the obvious looped feel of a single
+// frequency; a high-frequency jitter term adds micro-motion; a low-frequency
+// breathing term gives subtle, periodic pitch rocking.
+//
+// Peak amplitude < 1.3° per the source — small enough that the renderer
+// reads it as ambient life, not deliberate motion. State multipliers gate it
+// off while the baked Responding clip is driving the neck.
+//
+// Axes are FLAME-bone local: X = pitch (nod), Y = yaw (left/right), Z = roll.
+// We use the axis-angle representation expected by FlameAnimator.setBoneRotation:
+// the returned vector is (angle * axis) so each component is the rotation
+// (in radians) about that axis. For small angles this approximates Euler
+// composition closely enough.
+const NECK_SWAY = {
+  yawHz1: 0.7,    yawHz2: 1.3,    yawPeakDeg: 1.0,
+  pitchHz1: 0.5,  pitchHz2: 1.1,  pitchPeakDeg: 0.7,
+  jitterHz1: 18,  jitterHz2: 14,  jitterPeakDeg: 0.25,
+  breatheHz: 0.8,                 breathePeakDeg: 0.4,
+};
+const DEG_TO_RAD = Math.PI / 180;
+
+// State multipliers for the sway amplitude. Idle = full ambient, Listening =
+// subdued (focused on user), Responding = 0 so the baked clip's neck data
+// passes through unaltered.
+const NECK_SWAY_STATE_MUL: Record<ChatState, number> = {
+  'Idle':       1.0,
+  'Listening':  0.6,
+  'Responding': 0.0,
+};
+
 const EYE_LOOK_CHANNELS = [
   'eyeLookInLeft', 'eyeLookInRight',
   'eyeLookOutLeft', 'eyeLookOutRight',
@@ -183,6 +215,14 @@ export class GaussianAvatar implements Disposable {
   private msInLowEnergy = 0;                    // contiguous ms below threshold
   private msInHighEnergy = 0;                   // contiguous ms above threshold
   private inSpeechPause = false;                // hysteretic pause state
+
+  // Procedural neck sway state. Cached return object + array reused across
+  // frames to keep getNeckPose() allocation-free (called at 30 Hz inside the
+  // renderer's RAF loop).
+  private _swayStartTimeMs = 0;
+  private readonly _neckPoseResult: { neck: [number, number, number] } = {
+    neck: [0, 0, 0],
+  };
   
   constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
     this._avatarDivEle = container;
@@ -217,6 +257,7 @@ export class GaussianAvatar implements Disposable {
       {
         getChatState: this.getChatState.bind(this),
         getExpressionData: this.getArkitFaceFrame.bind(this),
+        getNeckPose: this.getNeckPose.bind(this),
         backgroundColor: "0xffffff"
       },
     );
@@ -340,6 +381,57 @@ export class GaussianAvatar implements Disposable {
    */
   public updateBlendshapes(weights: Record<string, number>): void {
     this.liveBlendshapeData = weights;
+  }
+
+  /**
+   * Procedural neck-sway callback consumed by the renderer once per RAF frame
+   * (~30 Hz). Returns a multi-sine ambient motion for the FLAME 'neck' bone in
+   * axis-angle form (component = radians about that local axis). Returning
+   * `null` lets the baked animation.glb clip drive the neck unmodified — used
+   * during Responding so the speech clips are not fought.
+   *
+   * Allocation-free: the cached _neckPoseResult is mutated in place. Renderer
+   * copies values into a Quaternion on the bone, so mutating across frames is
+   * safe.
+   */
+  public getNeckPose(): { neck: [number, number, number] } | null {
+    const stateMul = NECK_SWAY_STATE_MUL[this.curState];
+    if (stateMul === 0) return null;
+
+    const nowMs = performance.now();
+    if (this._swayStartTimeMs === 0) this._swayStartTimeMs = nowMs;
+    const t = (nowMs - this._swayStartTimeMs) / 1000;
+
+    // Multi-sine yaw: two detuned frequencies, peak normalized to yawPeakDeg.
+    // (sin1 + 0.6*sin2) has theoretical peak 1.6, so divide by 1.6 to land at amp.
+    const yawDeg = (
+      Math.sin(2 * Math.PI * NECK_SWAY.yawHz1 * t) +
+      0.6 * Math.sin(2 * Math.PI * NECK_SWAY.yawHz2 * t)
+    ) / 1.6 * NECK_SWAY.yawPeakDeg;
+
+    // Pitch: dual sinusoids + breathing rhythm + tiny high-freq jitter.
+    // Peak budget: pitchPeakDeg + breathePeakDeg + jitterPeakDeg ~ 1.35°.
+    const pitchBase = (
+      Math.sin(2 * Math.PI * NECK_SWAY.pitchHz1 * t) +
+      0.5 * Math.sin(2 * Math.PI * NECK_SWAY.pitchHz2 * t)
+    ) / 1.5 * NECK_SWAY.pitchPeakDeg;
+    const breathe = Math.sin(2 * Math.PI * NECK_SWAY.breatheHz * t)
+      * NECK_SWAY.breathePeakDeg;
+    const jitter = (
+      Math.sin(2 * Math.PI * NECK_SWAY.jitterHz1 * t) +
+      Math.sin(2 * Math.PI * NECK_SWAY.jitterHz2 * t)
+    ) / 2 * NECK_SWAY.jitterPeakDeg;
+    const pitchDeg = pitchBase + breathe + jitter;
+
+    const pitchRad = pitchDeg * DEG_TO_RAD * stateMul;
+    const yawRad   = yawDeg   * DEG_TO_RAD * stateMul;
+
+    // Axis-angle: FlameAnimator interprets [x, y, z] as (axis * angle).
+    // For small composed rotations this is ~Euler XYZ with X=pitch, Y=yaw.
+    this._neckPoseResult.neck[0] = pitchRad;
+    this._neckPoseResult.neck[1] = yawRad;
+    this._neckPoseResult.neck[2] = 0;
+    return this._neckPoseResult;
   }
 
   /**
