@@ -112,6 +112,40 @@ const PAUSE_RMS_EMA_ALPHA = 0.4;     // strong smoothing; new samples at 30 Hz
 const RESPONDING_FLUENT_RETURN_PROB = 0.85;
 const RESPONDING_PAUSE_RETURN_PROB  = 0.25;
 
+// ─── Live → neutral fade on Talking → Idle ──────────────────────────────────
+// When the TTS stream stops, the widget's liveBlendshapeData goes null and
+// the avatar would snap to neutralBlendshapes within ~33ms. That reads as
+// unnatural — the face goes from emotive to dead in one frame.
+//
+// Per-channel-group fade durations follow industry conventions:
+//   - mouth/jaw  fade fast so the avatar doesn't appear mid-word
+//   - brow       fade slowest (lingering emotional residue is natural)
+//   - eye region intermediate
+// (Confirmed against NVIDIA Audio2Face MotionSettings 500ms default + Apple
+//  ARKit live-mode docs in research pass 2026-06-10. Cubic-out easing matches
+//  the GDC/SIGGRAPH consensus for snappy-but-not-jarring decay.)
+const FADE_DURATION_MS: Record<string, number> = {
+  mouth:  250,   // mouth* + jaw*  — close fast
+  brow:   600,   // brow*          — relax slow
+  eye:    500,   // eyeSquint, eyeWide, cheek, nose
+  other:  500,   // safe default
+};
+// Map blendshape name -> fade group via prefix match.
+function fadeGroupFor(name: string): keyof typeof FADE_DURATION_MS {
+  if (name.startsWith('mouth') || name.startsWith('jaw')) return 'mouth';
+  if (name.startsWith('brow')) return 'brow';
+  if (name.startsWith('eyeSquint') || name.startsWith('eyeWide') ||
+      name.startsWith('cheek') || name.startsWith('nose')) return 'eye';
+  return 'other';
+}
+// Cubic-out: 1 - (1-t)^3. Fast initial relaxation, slow settle.
+function cubicOut(t: number): number {
+  const u = 1 - t;
+  return 1 - u * u * u;
+}
+// Longest fade we ever apply — once elapsed, drop the cached last frame.
+const FADE_MAX_MS = Math.max(...Object.values(FADE_DURATION_MS));
+
 // ─── Procedural neck/head sway ──────────────────────────────────────────────
 // Multi-sine "idle motion" recipe transposed from privacypuppet (MIT). Two
 // detuned sinusoids per axis avoid the obvious looped feel of a single
@@ -223,6 +257,13 @@ export class GaussianAvatar implements Disposable {
   private readonly _neckPoseResult: { neck: [number, number, number] } = {
     neck: [0, 0, 0],
   };
+
+  // Live → neutral fade state. On disableLiveBlendshapes() we snapshot the
+  // last live frame and stamp the wall-clock; getArkitFaceFrame() then lerps
+  // each channel toward neutral over its per-group fade duration. New live
+  // data via updateBlendshapes() cancels the fade.
+  private _fadeFromBlendshapes: Record<string, number> | null = null;
+  private _fadeStartTimeMs = 0;
   
   constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
     this._avatarDivEle = container;
@@ -371,16 +412,28 @@ export class GaussianAvatar implements Disposable {
    * (Kept for API compatibility - clears live data)
    */
   public disableLiveBlendshapes(): void {
+    // Capture the last live frame so getArkitFaceFrame can fade FROM it
+    // toward neutralBlendshapes instead of snapping in one frame. Called from
+    // ChatManager on playback-end / interrupt / minimize.
+    if (this.liveBlendshapeData) {
+      this._fadeFromBlendshapes = { ...this.liveBlendshapeData };
+      this._fadeStartTimeMs = performance.now();
+    }
     this.liveBlendshapeData = null;
-    log.debug('Live blendshapes cleared');
+    log.debug('Live blendshapes cleared — fading to neutral');
   }
-  
+
   /**
    * Update blendshapes from real-time stream
    * OpenAvatarChat pattern: Always accept updates, they're applied in getArkitFaceFrame
    */
   public updateBlendshapes(weights: Record<string, number>): void {
     this.liveBlendshapeData = weights;
+    // Any new live data cancels an in-progress fade. The next response's
+    // own emotion EMA (model-side, ~5s) handles the ramp-in.
+    if (this._fadeFromBlendshapes !== null) {
+      this._fadeFromBlendshapes = null;
+    }
   }
 
   /**
@@ -479,12 +532,29 @@ export class GaussianAvatar implements Disposable {
     }
     
     let result: Record<string, number>;
-    
-    // Use live blendshapes if available (always - following OpenAvatarChat)
+
     if (this.liveBlendshapeData) {
+      // Live stream active — pass through
       result = { ...this.liveBlendshapeData };
+    } else if (this._fadeFromBlendshapes !== null) {
+      // Talking → Idle fade: lerp each channel from its last live value
+      // toward neutral over a per-group duration with cubic-out easing.
+      const elapsed = performance.now() - this._fadeStartTimeMs;
+      result = {};
+      for (const name in this.neutralBlendshapes) {
+        const dur = FADE_DURATION_MS[fadeGroupFor(name)];
+        const t = Math.min(elapsed / dur, 1.0);
+        const a = cubicOut(t);
+        const from = this._fadeFromBlendshapes[name] ?? this.neutralBlendshapes[name];
+        const to = this.neutralBlendshapes[name];
+        result[name] = from * (1 - a) + to * a;
+      }
+      // Drop the snapshot once the longest fade has completed.
+      if (elapsed >= FADE_MAX_MS) {
+        this._fadeFromBlendshapes = null;
+      }
     } else {
-      // No live data: use neutral pose
+      // Fully idle: neutral pose
       result = { ...this.neutralBlendshapes };
     }
     
