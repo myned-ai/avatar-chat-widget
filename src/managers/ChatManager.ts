@@ -19,7 +19,7 @@ import { SyncPlayback, type SyncFrame } from '../services/SyncPlayback';
 import { FeatureDetection } from '../utils/FeatureDetection';
 import { errorBoundary } from '../utils/ErrorBoundary';
 import { logger } from '../utils/Logger';
-import type { Disposable } from '../types/common';
+import type { Disposable, ChatState } from '../types/common';
 import type { IAvatarController } from '../types/avatar';
 import type { OutgoingTextMessage } from '../types/messages';
 import { CHAT_TIMING } from '../constants/chat';
@@ -297,6 +297,12 @@ export class ChatManager implements Disposable {
       log.info('SyncPlayback ended - setting playbackEnded flag.');
       this.playbackEnded = true;
     });
+
+    // Feed audio RMS to the avatar so its procedural gaze can detect
+    // speech pauses and look away during them (Kendon turn-holding cue).
+    this.syncPlayback.setAudioRMSCallback((rms) => {
+      this.avatar.updateAudioRMS?.(rms);
+    });
   }
 
   private setupAutoScroll(): void {
@@ -359,9 +365,14 @@ export class ChatManager implements Disposable {
 
     this.protocolClient.on('avatar_state', (event: { state: string }) => {
       log.info('Avatar state event:', event);
-      const stateMap: Record<string, 'Idle' | 'Responding'> = {
+      // Server vocabulary -> widget ChatState.
+      // 'Listening' now surfaces as a distinct state (was collapsed to 'Idle' pre-Track 5)
+      // so the procedural-gaze controller can apply 75%-mutual Eyes-Alive tuning while
+      // the user is speaking. 'Thinking'/'Processing' still ride 'Responding' until
+      // the renderer's TYVoiceChatState.Thinking branch is wired up.
+      const stateMap: Record<string, ChatState> = {
         'Idle': 'Idle',
-        'Listening': 'Idle',
+        'Listening': 'Listening',
         'Thinking': 'Responding',
         'Processing': 'Responding',
         'Responding': 'Responding',
