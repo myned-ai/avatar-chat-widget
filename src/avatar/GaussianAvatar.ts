@@ -112,37 +112,147 @@ const PAUSE_RMS_EMA_ALPHA = 0.4;     // strong smoothing; new samples at 30 Hz
 const RESPONDING_FLUENT_RETURN_PROB = 0.85;
 const RESPONDING_PAUSE_RETURN_PROB  = 0.25;
 
-// ─── Procedural neck/head sway ──────────────────────────────────────────────
-// Multi-sine "idle motion" recipe transposed from privacypuppet (MIT). Two
-// detuned sinusoids per axis avoid the obvious looped feel of a single
-// frequency; a high-frequency jitter term adds micro-motion; a low-frequency
-// breathing term gives subtle, periodic pitch rocking.
+// ─── Procedural head/neck pose (v1 — see .claude/research/3dmm_transitions_and_state_machine.md §10) ──
 //
-// Peak amplitude < 1.3° per the source — small enough that the renderer
-// reads it as ambient life, not deliberate motion. State multipliers gate it
-// off while the baked Responding clip is driving the neck.
+// State-branched driver:
+//   Idle       → return null (baked idle clip drives entirely)
+//   Listening  → still-listening baseline sway + cue-triggered damped-sine nod
+//                on 110 ms of audio silence (Ward & Tsukahara 2000 placeholder
+//                — proper version needs user-mic F0)
+//   Responding → RMS-driven head + breathing baseline + yaw drift (RMS is a
+//                placeholder for F0 per §3; head rises slightly on louder
+//                speech which roughly approximates rising on pitch peaks)
 //
-// Axes are FLAME-bone local: X = pitch (nod), Y = yaw (left/right), Z = roll.
-// We use the axis-angle representation expected by FlameAnimator.setBoneRotation:
-// the returned vector is (angle * axis) so each component is the rotation
-// (in radians) about that axis. For small angles this approximates Euler
-// composition closely enough.
-const NECK_SWAY = {
-  yawHz1: 0.7,    yawHz2: 1.3,    yawPeakDeg: 1.0,
-  pitchHz1: 0.5,  pitchHz2: 1.1,  pitchPeakDeg: 0.7,
-  jitterHz1: 18,  jitterHz2: 14,  jitterPeakDeg: 0.25,
-  breatheHz: 0.8,                 breathePeakDeg: 0.4,
-};
+// All rotations are Euler 'YXZ' radians and distributed along the DAZ
+// cervical chain (head 0.55 / neckUpper 0.30 / neckLower 0.15 — §2).
+// Output passes through a 1€ filter (Casiez 2012, §7) per axis on the
+// baseline (NOT on the nod transient — that would smear it).
 const DEG_TO_RAD = Math.PI / 180;
 
-// State multipliers for the sway amplitude. Idle = full ambient, Listening =
-// subdued (focused on user), Responding = 0 so the baked clip's neck data
-// passes through unaltered.
-const NECK_SWAY_STATE_MUL: Record<ChatState, number> = {
-  'Idle':       1.0,
-  'Listening':  0.6,
-  'Responding': 0.0,
+// Listening baseline ("still listening" floor — visible motion so the avatar
+// reads as engaged). Catalog §12 amplitudes: empathy tilts 8-15°, attentive
+// nods 5-10°. Previous values (sub-degree) were below visibility threshold.
+const LISTEN_SWAY = {
+  yawHz1: 0.7,   yawHz2: 1.3,   yawPeakDeg: 3.0,   // was 0.8
+  pitchHz1: 0.5, pitchHz2: 1.1, pitchPeakDeg: 2.0, // was 0.5
+  breatheHz: 0.3,                breathePeakDeg: 1.0, // was 0.3
+  rollHz1: 0.25, rollHz2: 0.55, rollPeakDeg: 8.0,  // was 5.0 (now in catalog range)
 };
+
+// Nod (damped sine; §4 — Ward & Tsukahara cue → 3-cycle damped sine).
+const NOD = {
+  amplitudeDeg:        6,    // peak pitch, chin-down (negative pitch)
+  frequencyHz:         1.6,
+  decayTauS:           0.4,
+  cycles:              3,    // ≈ 1.9 s total
+  triggerSilenceMs:    110,  // §4 — Ward & Tsukahara low-pitch threshold
+  triggerDelayMinMs:   200,
+  triggerDelayMaxMs:   400,
+};
+
+// Responding driver — REV 2 (2026-06-11 evening).
+// REV 1 mapped absolute RMS level to absolute pitch position → head stayed
+// pinned at +5° the whole time the avatar talked. Wrong: real speakers MOVE
+// the head on speech BURSTS (stressed syllables), not on overall volume.
+//
+// REV 2 high-passes RMS: pitch is driven by (RMS - smoothed(RMS, slow)), i.e.
+// how much the current syllable rises above the surrounding average. Settles
+// back to zero between syllables. Pitch CHANGES with speech rhythm, doesn't
+// pin to level.
+// Responding driver — REV 3 (2026-06-11 night).
+// REV 2 high-passed RMS to get rid of "head pinned up" bias, but produced
+// nearly-zero output during steady speech (the slow EMA tracks the level
+// and the residual collapses). Live test confirmed ±1.4° pitch — invisible.
+//
+// REV 3 adds a "speech rhythm" pitch oscillator: while speech is active
+// (RMS > threshold) the head bobs at ~1.5 Hz with amplitude proportional to
+// the current RMS. This is the speech-rhythm pattern in McClave 2000 and
+// the classic visual-prosody finding (Munhall 2004 — head motion correlates
+// with F0 envelope at ~0.83 sentence-level). High-pass burst stays on top
+// for transients. Plus larger breathing, yaw drift, and roll.
+const SPEECH_HEAD = {
+  // Speech-rhythm oscillator (gated by RMS > silenceThresh).
+  rhythmHz:            1.6,    // ~1.5 Hz = syllable rate
+  rhythmRmsToAmpScale: 90,     // RMS 0.05 → amp ≈ 4.5°; RMS 0.10 → ≈ 9°
+  rhythmAmpClampDeg:   10,     // hard cap
+  rhythmSilenceThresh: 0.005,  // gate: skip oscillator below this RMS
+  // High-pass burst (REV 2, kept for transients).
+  pitchBurstScale:     350,    // was 220
+  pitchBurstClampDeg:  8,      // was 6
+  slowRmsEmaAlpha:     0.04,   // ~1 s timescale
+  pitchReleaseAlpha:   0.35,   // faster release for visible motion
+  // Baselines.
+  breatheHz:           0.4,
+  breathePeakDeg:      3.0,    // was 1.5
+  yawSlowHz1:          0.4,
+  yawSlowHz2:          0.95,
+  yawSlowPeakDeg:      6.0,    // was 3.0
+  rollHz1:             0.18,
+  rollHz2:             0.42,
+  rollPeakDeg:         5.0,    // was 2.5
+};
+
+// Cervical distribution for roll (§2 biomech — slightly more even split than
+// pitch/yaw because lower-cervical contributes more to lateral flexion).
+const NECK_DIST_ROLL = {
+  head:      0.45,
+  neckUpper: 0.35,
+  neckLower: 0.20,
+};
+
+// State-enter ramp duration (ms). Procedural amplitude ramps from 0 to 1 over
+// this window after a state change so the bones drift smoothly out of the
+// previous state's pose rather than snapping. The speak clip's body motion
+// also crossfades over ~0.5 s (renderer's blendingTime constant), so these are
+// matched.
+const STATE_ENTER_RAMP_MS = 500;
+
+// Cervical distribution along chain. §2 biomech.
+const NECK_DIST = {
+  head:      0.55,
+  neckUpper: 0.30,
+  neckLower: 0.15,
+};
+
+// 1€ filter parameters (§7 — Casiez 2012). beta=0.02 = slow social motion.
+const ONE_EURO_MIN_CUTOFF_HZ = 1.0;
+const ONE_EURO_BETA = 0.02;
+
+/**
+ * Casiez 2012 1€ filter — simple speed-based low-pass with derivative-adaptive
+ * cutoff. Filters noise at low velocity, preserves transients at high velocity.
+ * One instance per axis; state persists across frames.
+ * https://gery.casiez.net/1euro/
+ */
+class OneEuroFilter {
+  private xPrev = 0;
+  private dxPrev = 0;
+  private tPrevSec = 0;
+  private initialized = false;
+  constructor(private readonly minCutoff: number, private readonly beta: number) {}
+  reset() { this.initialized = false; }
+  filter(x: number, tSec: number): number {
+    if (!this.initialized) {
+      this.xPrev = x; this.dxPrev = 0; this.tPrevSec = tSec; this.initialized = true;
+      return x;
+    }
+    const dt = Math.max(1e-3, tSec - this.tPrevSec);
+    const dx = (x - this.xPrev) / dt;
+    // Smooth the derivative itself with min_cutoff
+    const aD = this.alpha(this.minCutoff, dt);
+    this.dxPrev = aD * dx + (1 - aD) * this.dxPrev;
+    // Adapt cutoff to derivative magnitude
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.dxPrev);
+    const aX = this.alpha(cutoff, dt);
+    this.xPrev = aX * x + (1 - aX) * this.xPrev;
+    this.tPrevSec = tSec;
+    return this.xPrev;
+  }
+  private alpha(cutoffHz: number, dt: number): number {
+    const tau = 1 / (2 * Math.PI * cutoffHz);
+    return 1 / (1 + tau / dt);
+  }
+}
 
 const EYE_LOOK_CHANNELS = [
   'eyeLookInLeft', 'eyeLookInRight',
@@ -216,13 +326,49 @@ export class GaussianAvatar implements Disposable {
   private msInHighEnergy = 0;                   // contiguous ms above threshold
   private inSpeechPause = false;                // hysteretic pause state
 
-  // Procedural neck sway state. Cached return object + array reused across
+  // Procedural neck sway state. Cached return object + arrays reused across
   // frames to keep getNeckPose() allocation-free (called at 30 Hz inside the
-  // renderer's RAF loop).
+  // renderer's RAF loop). DAZ-style cervical chain: chestUpper → neckLower →
+  // neckUpper → head. Distribute rotation 10/30/60 along the chain — looks
+  // more natural than driving 'head' alone (which gives a rigid-neck dolly
+  // effect). The renderer iterates pose keys as bone names.
   private _swayStartTimeMs = 0;
-  private readonly _neckPoseResult: { neck: [number, number, number] } = {
-    neck: [0, 0, 0],
+  private readonly _neckPoseResult: {
+    head: [number, number, number],
+    neckUpper: [number, number, number],
+    neckLower: [number, number, number],
+  } = {
+    head: [0, 0, 0],
+    neckUpper: [0, 0, 0],
+    neckLower: [0, 0, 0],
   };
+  // Nod scheduler state (Listening backchannel cue).
+  // _nodPendingFireAtMs > 0 means a nod has been scheduled but not yet started.
+  // _nodStartMs > 0 means a nod is in progress.
+  private _nodPendingFireAtMs = 0;
+  private _nodStartMs = 0;
+
+  // 1€ filter per axis (baseline only — nod transient is added unfiltered).
+  private readonly _pitchFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
+  private readonly _yawFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
+  private readonly _rollFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
+  // High-pass state for the Responding RMS driver (REV 2). Slow EMA tracks
+  // overall speech level (~1s timescale); the residual (current - slow) is the
+  // burst signal that drives head pitch impulses.
+  private _slowRmsEma = 0;
+  private _pitchBurstEma = 0;
+  // State change tracker for the symmetric two-phase ramp:
+  //   0   → halfway through ramp: emit PREV state's pose, amplitude 1 → 0
+  //   half → end of ramp:         emit CURRENT state's pose, amplitude 0 → 1
+  // This mirrors the speak/idle clip authoring convention where every clip
+  // starts and ends at the same neutral pose, so the transition passes
+  // through the default position before the next state engages.
+  private _prevStateForRamp: ChatState = 'Idle';
+  private _stateChangeMs = 0;
+  // Used by the fade-out half: when we transition INTO Idle, we still need to
+  // emit the previous procedural pattern (Listening or Responding) for
+  // ~250 ms while decaying its amplitude. Captures the last non-Idle state.
+  private _lastNonIdleStateForFade: ChatState | null = null;
   
   constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
     this._avatarDivEle = container;
@@ -265,6 +411,9 @@ export class GaussianAvatar implements Disposable {
     if (this._backgroundImage) {
       this._applySceneBackground(this._backgroundImage);
     }
+
+    // DEBUG: expose renderer for devtools probing (bone-color visualization, etc.)
+    (window as unknown as { __nyxRenderer: unknown }).__nyxRenderer = this._renderer;
 
     this.startTime = performance.now() / 1000;
     // Initial state is 'Idle' - ChatManager will set appropriate states based on conversation
@@ -384,54 +533,226 @@ export class GaussianAvatar implements Disposable {
   }
 
   /**
-   * Procedural neck-sway callback consumed by the renderer once per RAF frame
-   * (~30 Hz). Returns a multi-sine ambient motion for the FLAME 'neck' bone in
-   * axis-angle form (component = radians about that local axis). Returning
-   * `null` lets the baked animation.glb clip drive the neck unmodified — used
-   * during Responding so the speech clips are not fought.
+   * Procedural head/neck pose callback consumed by the renderer once per RAF
+   * frame (~30 Hz). Returns Euler 'YXZ' radians for each bone in the DAZ
+   * cervical chain (head, neckUpper, neckLower).
    *
-   * Allocation-free: the cached _neckPoseResult is mutated in place. Renderer
-   * copies values into a Quaternion on the bone, so mutating across frames is
-   * safe.
+   * State machine (v1 — see .claude/research/3dmm_transitions_and_state_machine.md §10):
+   *   Idle       → null (baked idle clip drives)
+   *   Listening  → baseline sway + cue-triggered damped-sine nod on 110 ms silence
+   *   Responding → RMS-driven head + breathing baseline + yaw drift
+   *
+   * Allocation-free: mutates cached _neckPoseResult in place.
    */
-  public getNeckPose(): { neck: [number, number, number] } | null {
-    const stateMul = NECK_SWAY_STATE_MUL[this.curState];
-    if (stateMul === 0) return null;
-
+  public getNeckPose(): {
+    head: [number, number, number],
+    neckUpper: [number, number, number],
+    neckLower: [number, number, number],
+  } | null {
     const nowMs = performance.now();
+
+    // Detect state change → start the two-phase ramp.
+    if (this.curState !== this._prevStateForRamp) {
+      // Don't reset filters mid-transition — keep them smoothing through the
+      // ramp so the per-axis 1€ output doesn't jump.
+      this._stateChangeMs = nowMs;
+      this._nodPendingFireAtMs = 0;
+      this._nodStartMs = 0;
+      // Snapshot the OUTGOING state for the fade-out phase; new state becomes
+      // the incoming target. Special-case Idle → x: skip the fade-out phase
+      // entirely (we were emitting null, nothing to fade from).
+      const wasIdle = this._prevStateForRamp === 'Idle';
+      this._prevStateForRamp = this.curState;
+      // Mark the change so the ramp computation below knows the elapsed time.
+      // wasIdle path: jump straight into fade-IN by back-dating the ramp by half.
+      if (wasIdle) this._stateChangeMs -= STATE_ENTER_RAMP_MS / 2;
+    }
+
+    const msSinceChange = nowMs - this._stateChangeMs;
+    const rampHalf = STATE_ENTER_RAMP_MS / 2;
+
+    // Phase selection:
+    //   msSinceChange < rampHalf:  emit the *previous* procedural state's pose,
+    //                              amplitude 1 → 0 (fade out to neutral)
+    //   msSinceChange >= rampHalf: emit the *current* procedural state's pose,
+    //                              amplitude 0 → 1 (fade in from neutral)
+    let computeState: ChatState;
+    let amplitude: number;
+    if (msSinceChange < rampHalf) {
+      // Fade-out half. If we're now Idle, the prev state was procedural and
+      // we should emit its decaying pose. If we're STILL in a procedural
+      // state (rare — happens only mid-transition), use the new state.
+      if (this.curState === 'Idle' && this._lastNonIdleStateForFade !== null) {
+        computeState = this._lastNonIdleStateForFade;
+      } else {
+        computeState = this.curState;
+      }
+      amplitude = 1 - (msSinceChange / rampHalf);
+    } else if (msSinceChange < STATE_ENTER_RAMP_MS) {
+      // Fade-in half. Use new state.
+      computeState = this.curState;
+      amplitude = (msSinceChange - rampHalf) / rampHalf;
+    } else {
+      // Past the ramp window — full amplitude.
+      computeState = this.curState;
+      amplitude = 1;
+    }
+
+    // If we're now in Idle AND past the ramp, return null so the baked clip
+    // drives entirely. Inside the ramp we keep emitting (with amplitude=0 at
+    // worst) so the bone glides to neutral instead of snapping.
+    if (this.curState === 'Idle' && msSinceChange >= rampHalf) return null;
+
+    // Remember the most recent procedural state so the fade-out half can
+    // continue emitting its pattern after we transition to Idle.
+    if (this.curState !== 'Idle') this._lastNonIdleStateForFade = this.curState;
+
     if (this._swayStartTimeMs === 0) this._swayStartTimeMs = nowMs;
     const t = (nowMs - this._swayStartTimeMs) / 1000;
+    const tSec = nowMs / 1000;
 
-    // Multi-sine yaw: two detuned frequencies, peak normalized to yawPeakDeg.
-    // (sin1 + 0.6*sin2) has theoretical peak 1.6, so divide by 1.6 to land at amp.
-    const yawDeg = (
-      Math.sin(2 * Math.PI * NECK_SWAY.yawHz1 * t) +
-      0.6 * Math.sin(2 * Math.PI * NECK_SWAY.yawHz2 * t)
-    ) / 1.6 * NECK_SWAY.yawPeakDeg;
+    let baselinePitchDeg = 0;
+    let baselineYawDeg = 0;
+    let baselineRollDeg = 0;
 
-    // Pitch: dual sinusoids + breathing rhythm + tiny high-freq jitter.
-    // Peak budget: pitchPeakDeg + breathePeakDeg + jitterPeakDeg ~ 1.35°.
-    const pitchBase = (
-      Math.sin(2 * Math.PI * NECK_SWAY.pitchHz1 * t) +
-      0.5 * Math.sin(2 * Math.PI * NECK_SWAY.pitchHz2 * t)
-    ) / 1.5 * NECK_SWAY.pitchPeakDeg;
-    const breathe = Math.sin(2 * Math.PI * NECK_SWAY.breatheHz * t)
-      * NECK_SWAY.breathePeakDeg;
-    const jitter = (
-      Math.sin(2 * Math.PI * NECK_SWAY.jitterHz1 * t) +
-      Math.sin(2 * Math.PI * NECK_SWAY.jitterHz2 * t)
-    ) / 2 * NECK_SWAY.jitterPeakDeg;
-    const pitchDeg = pitchBase + breathe + jitter;
+    if (computeState === 'Listening') {
+      // Baseline still-listening sway (subtle floor under the nod cue).
+      baselineYawDeg = (
+        Math.sin(2 * Math.PI * LISTEN_SWAY.yawHz1 * t)
+        + 0.6 * Math.sin(2 * Math.PI * LISTEN_SWAY.yawHz2 * t)
+      ) / 1.6 * LISTEN_SWAY.yawPeakDeg;
+      baselinePitchDeg = (
+        Math.sin(2 * Math.PI * LISTEN_SWAY.pitchHz1 * t)
+        + 0.5 * Math.sin(2 * Math.PI * LISTEN_SWAY.pitchHz2 * t)
+      ) / 1.5 * LISTEN_SWAY.pitchPeakDeg
+        + Math.sin(2 * Math.PI * LISTEN_SWAY.breatheHz * t) * LISTEN_SWAY.breathePeakDeg;
+      // Slow roll — empathy/attentiveness lean (catalog §12: tilt is the
+      // listener's primary semantic channel besides nods). Detuned slow
+      // sines avoid periodic-loop feel; amplitude is ~5° max so the head
+      // gently tilts rather than dramatically cocks.
+      baselineRollDeg = (
+        Math.sin(2 * Math.PI * LISTEN_SWAY.rollHz1 * t)
+        + 0.7 * Math.sin(2 * Math.PI * LISTEN_SWAY.rollHz2 * t)
+      ) / 1.7 * LISTEN_SWAY.rollPeakDeg;
+    } else if (computeState === 'Responding') {
+      // REV 3 PRIMARY: speech-rhythm pitch oscillator.
+      // Active whenever speech audio is above silence threshold. Amplitude
+      // scales with current RMS so quiet speech = small bobs, loud speech =
+      // big bobs. Frequency ~1.5 Hz approximates syllable rate (catalog §12,
+      // McClave OM band 1.9–3.6 Hz scaled down for "head-level" pitch motion).
+      if (this.smoothedAudioRMS > SPEECH_HEAD.rhythmSilenceThresh) {
+        const rhythmAmp = Math.min(
+          SPEECH_HEAD.rhythmAmpClampDeg,
+          this.smoothedAudioRMS * SPEECH_HEAD.rhythmRmsToAmpScale,
+        );
+        baselinePitchDeg += -rhythmAmp * Math.sin(2 * Math.PI * SPEECH_HEAD.rhythmHz * t);
+        // Negative sin so the head DIPS on stressed syllable downbeats (catalog
+        // §12: stress beat = down-dip).
+      }
+      // REV 2 SECONDARY: high-pass burst layered on top for transient emphasis.
+      this._slowRmsEma = SPEECH_HEAD.slowRmsEmaAlpha * this.smoothedAudioRMS
+                       + (1 - SPEECH_HEAD.slowRmsEmaAlpha) * this._slowRmsEma;
+      const burst = this.smoothedAudioRMS - this._slowRmsEma;
+      const rawPitchBurstDeg = Math.max(
+        -SPEECH_HEAD.pitchBurstClampDeg,
+        Math.min(SPEECH_HEAD.pitchBurstClampDeg, burst * SPEECH_HEAD.pitchBurstScale),
+      );
+      this._pitchBurstEma = SPEECH_HEAD.pitchReleaseAlpha * rawPitchBurstDeg
+                          + (1 - SPEECH_HEAD.pitchReleaseAlpha) * this._pitchBurstEma;
+      baselinePitchDeg += this._pitchBurstEma;
+      // Breathing baseline (always present, non-RMS).
+      baselinePitchDeg += Math.sin(2 * Math.PI * SPEECH_HEAD.breatheHz * t)
+                       * SPEECH_HEAD.breathePeakDeg;
+      // Slow yaw drift — head turns gently across long utterances.
+      baselineYawDeg = (
+        Math.sin(2 * Math.PI * SPEECH_HEAD.yawSlowHz1 * t)
+        + 0.5 * Math.sin(2 * Math.PI * SPEECH_HEAD.yawSlowHz2 * t)
+      ) / 1.5 * SPEECH_HEAD.yawSlowPeakDeg;
+      // Slow roll drift during speech — head tilts during long phrases.
+      baselineRollDeg = (
+        Math.sin(2 * Math.PI * SPEECH_HEAD.rollHz1 * t)
+        + 0.6 * Math.sin(2 * Math.PI * SPEECH_HEAD.rollHz2 * t)
+      ) / 1.6 * SPEECH_HEAD.rollPeakDeg;
+    }
 
-    const pitchRad = pitchDeg * DEG_TO_RAD * stateMul;
-    const yawRad   = yawDeg   * DEG_TO_RAD * stateMul;
+    // 1€ filter ONLY on the slow baseline (filters out frame-to-frame jitter
+    // without smearing the nod transient added below).
+    const smoothPitchDeg = this._pitchFilter.filter(baselinePitchDeg, tSec);
+    const smoothYawDeg = this._yawFilter.filter(baselineYawDeg, tSec);
+    const smoothRollDeg = this._rollFilter.filter(baselineRollDeg, tSec);
 
-    // Axis-angle: FlameAnimator interprets [x, y, z] as (axis * angle).
-    // For small composed rotations this is ~Euler XYZ with X=pitch, Y=yaw.
-    this._neckPoseResult.neck[0] = pitchRad;
-    this._neckPoseResult.neck[1] = yawRad;
-    this._neckPoseResult.neck[2] = 0;
+    // Listening nod (added AFTER 1€ filter so the transient is preserved).
+    // Nod scheduler only runs while CURRENT state is Listening — we don't
+    // want to start a new nod during the fade-out half after leaving Listening.
+    let nodPitchDeg = 0;
+    if (this.curState === 'Listening') {
+      this._updateNodScheduler(nowMs);
+    }
+    if (computeState === 'Listening' && this._nodStartMs > 0) {
+      const tSinceNod = (nowMs - this._nodStartMs) / 1000;
+      const nodDuration = NOD.cycles / NOD.frequencyHz;
+      if (tSinceNod < nodDuration) {
+        const envelope = Math.exp(-tSinceNod / NOD.decayTauS);
+        nodPitchDeg = -NOD.amplitudeDeg * envelope
+                    * Math.sin(2 * Math.PI * NOD.frequencyHz * tSinceNod);
+      } else {
+        this._nodStartMs = 0;
+      }
+    }
+
+    // Compose Euler 'YXZ' per bone via cervical share distribution. With the
+    // renderer composing procedural as a DELTA on top of clip rotation
+    // (postmultiply), amplitude=0 means identity-delta = clip wins, so we don't
+    // need to pass through bind pose mid-transition. Roll uses a slightly
+    // different distribution (45/35/20) because lower-cervical contributes
+    // more to lateral flexion than to flex/yaw (§2 biomech). Renderer
+    // interprets [pitch, yaw, roll] = [x, y, z] in 'YXZ' Euler order and
+    // POSTMULTIPLIES onto bone.quaternion.
+    const totalPitchRad = (smoothPitchDeg + nodPitchDeg) * amplitude * DEG_TO_RAD;
+    const totalYawRad   = smoothYawDeg * amplitude * DEG_TO_RAD;
+    const totalRollRad  = smoothRollDeg * amplitude * DEG_TO_RAD;
+
+    // DEBUG 2026-06-11 evening: log every ~1 s so we can confirm roll is non-zero.
+    if (!(this as any)._lastNeckDebugMs || nowMs - (this as any)._lastNeckDebugMs > 1000) {
+      (this as any)._lastNeckDebugMs = nowMs;
+      const p = (totalPitchRad / DEG_TO_RAD).toFixed(2);
+      const y = (totalYawRad / DEG_TO_RAD).toFixed(2);
+      const r = (totalRollRad / DEG_TO_RAD).toFixed(2);
+      // eslint-disable-next-line no-console
+      console.log(`[NeckPose] state=${this.curState}  amp=${amplitude.toFixed(2)}  pitch=${p}°  yaw=${y}°  roll=${r}°`);
+    }
+
+    this._neckPoseResult.head[0]      = totalPitchRad * NECK_DIST.head;
+    this._neckPoseResult.head[1]      = totalYawRad   * NECK_DIST.head;
+    this._neckPoseResult.head[2]      = totalRollRad  * NECK_DIST_ROLL.head;
+    this._neckPoseResult.neckUpper[0] = totalPitchRad * NECK_DIST.neckUpper;
+    this._neckPoseResult.neckUpper[1] = totalYawRad   * NECK_DIST.neckUpper;
+    this._neckPoseResult.neckUpper[2] = totalRollRad  * NECK_DIST_ROLL.neckUpper;
+    this._neckPoseResult.neckLower[0] = totalPitchRad * NECK_DIST.neckLower;
+    this._neckPoseResult.neckLower[1] = totalYawRad   * NECK_DIST.neckLower;
+    this._neckPoseResult.neckLower[2] = totalRollRad  * NECK_DIST_ROLL.neckLower;
     return this._neckPoseResult;
+  }
+
+  /**
+   * Listening backchannel cue scheduler — Ward & Tsukahara 2000 placeholder.
+   * Triggers a damped-sine nod 200-400 ms after detecting 110 ms of audio
+   * silence (proper version needs user-mic F0 — §4 deferred work).
+   */
+  private _updateNodScheduler(nowMs: number): void {
+    // Fire a scheduled nod.
+    if (this._nodPendingFireAtMs > 0 && nowMs >= this._nodPendingFireAtMs) {
+      this._nodStartMs = nowMs;
+      this._nodPendingFireAtMs = 0;
+      return;
+    }
+    // Schedule a new nod if silence cue tripped AND no nod active/pending.
+    if (this._nodStartMs === 0 && this._nodPendingFireAtMs === 0
+        && this.msInLowEnergy >= NOD.triggerSilenceMs) {
+      const delay = NOD.triggerDelayMinMs
+                  + Math.random() * (NOD.triggerDelayMaxMs - NOD.triggerDelayMinMs);
+      this._nodPendingFireAtMs = nowMs + delay;
+    }
   }
 
   /**

@@ -72,6 +72,7 @@ export class SyncPlayback implements Disposable {
   // Callbacks
   private onBlendshapeUpdate: ((weights: Record<string, number>) => void) | null = null;
   private onPlaybackEnd: (() => void) | null = null;
+  private onAudioRMS: ((rms: number) => void) | null = null;
 
   // Buffer thresholds
   // Server sends ~30 frames per second in bursts (1 second of audio at a time)
@@ -137,6 +138,14 @@ export class SyncPlayback implements Disposable {
    */
   setPlaybackEndCallback(callback: () => void): void {
     this.onPlaybackEnd = callback;
+  }
+
+  /**
+   * Set callback that fires with the RMS energy (0..1) of every scheduled
+   * audio frame. Used by the avatar to drive pause-aware procedural gaze.
+   */
+  setAudioRMSCallback(callback: (rms: number) => void): void {
+    this.onAudioRMS = callback;
   }
 
   /**
@@ -332,9 +341,16 @@ export class SyncPlayback implements Disposable {
     }
     
     // Convert PCM16 to Float32 for Web Audio (optimized loop)
+    // Compute sum-of-squares inline for the RMS callback (no extra pass).
     const scale = 1.0 / 32768.0;
+    let sumSq = 0;
     for (let i = 0; i < sampleCount; i++) {
-      floatData[i] = pcmData[i] * scale;
+      const s = pcmData[i] * scale;
+      floatData[i] = s;
+      sumSq += s * s;
+    }
+    if (this.onAudioRMS && sampleCount > 0) {
+      this.onAudioRMS(Math.sqrt(sumSq / sampleCount));
     }
     
     // Create audio buffer - this allocation is unavoidable (Web Audio API requirement)
