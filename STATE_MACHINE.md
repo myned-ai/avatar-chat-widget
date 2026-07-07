@@ -35,7 +35,7 @@ retargeting their parameters with smooth transitions.
 | Transitions (who sets state) | same | `src/managers/ChatManager.ts` — server `avatar_state` events mapped at ~368-380; `'Responding'` on TTS start (466, 496, 752); `'Idle'` on stop/disconnect/errors |
 | ALL per-state behavior | same | `src/avatar/GaussianAvatar.ts` (single file, ~1000 lines) |
 | Renderer callback slots | `gsplat-flame-avatar-renderer` @ `feat/neck-pose-callback` (built dist consumed via widget `node_modules/@myned-ai/...`) | `getChatState`, `getExpressionData`, `getNeckPose` options |
-| Body clips (baked) | inside each avatar's OAC zip | `animation.glb` — renderer's hardcoded `animationConfig`: Responding → 3 speak clips (random + crossfade), Idle → 1 idle loop, **Listening → falls back to the same idle clip** |
+| Body clips (baked) | inside each avatar's OAC zip | `animation.glb` — **CORRECTION 2026-07-07:** the renderer's COMMITTED code maps Responding → 3 speak clips (random + crossfade), Idle/Listening → idle loop. But the RUNNING dist is built from uncommitted WIP (marker `2026-06-11-neckdebug` present in dist) whose `animationConfig` plays **ONLY the idle clip for ALL states** ("locked decision 2026-06-11" — speak/listen/think clips disabled; procedural neck is solely responsible for conversational head motion). Body energy is therefore CONSTANT across states in the live widget. |
 
 Widget repo path: `C:/Users/AntoniosMakrodimitra/Desktop/avatar-chat-widget`.
 
@@ -134,6 +134,132 @@ Hard-refresh (Ctrl+Shift+R) after every asset/code change. Watch console for
 `[NeckPose]` and `[gaze]` lines. Avatar asset = `public/asset/nyx.zip`.
 A talk turn: click mic, speak, watch Listening → (server) → Responding →
 Idle. The avatar-chat-server must be running for full conversation flow.
+
+> **Action plan:** the fixes for everything in this audit are broken down,
+> phased, and tracked in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+
+## 0.5 Design audit (2026-07-06) — literature verification + code ground-truth
+
+*Four-agent research verification pass (HRI gaze, turn-taking/latency,
+animation transition practice, listener/idle motion norms) plus a code audit
+of the state-transition path. New research lives in Q7b, Q8b, and Parts
+VIII–IX. Verdict summary:*
+
+**Sound and verified:**
+- The core architecture — discrete FSM as parameter packs over always-running
+  subsystems, smooth retarget — is canonical (Anguelov Game AI Pro 2 ch. 12
+  verified from full chapter; BML/SmartBody; motion-matching lineage).
+- Eyes-only gaze (no head recruitment) is biomechanically correct below ~20°
+  gaze shifts (Freedman & Sparks 1997). All our shifts qualify.
+- Phase-continuous oscillators with amplitude-only ramps = correct practice
+  (synth-envelope pattern; PFNN phase-averaging evidence).
+- Keeping the gaze generator running in Idle is correct (BML gaze persists
+  until redirected; humans saccade continuously at rest).
+
+**Not solid (ranked by severity):**
+1. **The FSM is not a machine — it is a shared variable.** `setChatState` has
+   ~10 uncoordinated writers (server `avatar_state`, TTS start ×2, mic-record
+   start→Idle, sendText→Idle, barge-in stop→Idle, RAF poll, playback drain,
+   connect/minimize/error paths). Last writer wins; no arbitration, no
+   transition legality, no dwell time, no mid-ramp policy. Industry treats
+   mid-transition interruption as first-class configuration (Unity
+   Interruption Source; Bollo fire-and-forget; Anguelov merge-vs-terminate).
+   → Part VIII Q25, Part IX Q26/Q29.
+2. **Two-phase fade-through-zero transition has no precedent found.** Every
+   documented mechanism blends old→new directly in ONE phase of 200–300 ms.
+   Code also diverges from this doc: for procedural→procedural changes BOTH
+   ramp phases compute the NEW state (`GaussianAvatar.ts` ~581-590) — formula
+   snap, then a dip through neutral. → Part IX Q26.
+3. **Thinking→Responding aliasing is contradicted by every source found.**
+   The documented processing display is a long UPWARD cognitive gaze aversion
+   (3.54 s ± 1.26, starting ~1.3 s before the response) — not speech
+   behavior; context-mismatched motion rates worse than doing nothing. A
+   dedicated Thinking display is one of the best-attested wins in the corpus
+   (4 independent studies, ~65% user preference). → Part VIII Q23.
+4. **±3° "microsaccade" is a mislabel — it is a visible re-fixation.** Real
+   microsaccades: median ~0.075°, classical bound ~0.25°, generous modern cap
+   1–2°. Ours is 12× the classical bound and fires on every mutual re-pick.
+   Aversion cadence is also ~5–10× human norms (Andrist 2014: aversions every
+   4.75 s speaking / 7.21 s listening, lasting 1–2 s). Likely THE cause of
+   user observation 3. → Q8b.
+5. **Listening ±8° continuous roll sway has no basis.** Listener heads are
+   still 40–90% of the time; listener motion ≈ intermittent pitch nods (−3°
+   to +15°); roll is rare and episodic. The 8° figure misapplied a
+   step-and-hold empathy-tilt GESTURE amplitude (Q7 catalog) as a continuous
+   oscillation amplitude. Energy law: **Speaking > Listening > Idle**, ~7:1
+   speaking:listening movement-time (Hadar 1983). Together with the
+   unscalable idle clip this explains user observation 2. → Q7b.
+6. **No VOR.** Procedural head sway drags gaze with it (no eye
+   counter-rotation); Pejsa 2015 implements VOR explicitly. This adds
+   continuous speech-locked gaze drift on top of the saccades. Cheap fix
+   candidate. → Q8b.
+7. **Server-authoritative state is too slow for listener gaze reactions.**
+   Human listener gaze shifts cluster −50 ms..+0.9 s around turn end; our
+   earliest flip = server endpoint (~700–1000 ms silence) + WS round trip.
+   Literature prescribes a widget-local reactive layer (mic VAD/RMS, 50–200
+   ms) with server state as slower authoritative correction; head/posture
+   may legitimately lag (+0.8 s). → Part VIII Q22.
+8. **Breathing ±3° head pitch too large** (real contribution <1°, belongs in
+   chest; speech breathing is phrase-locked, not sinusoidal). Responding
+   baselines (yaw 6°/roll 5°) are amplitude-plausible but running them
+   speech-INDEPENDENT is the defect behind user observation 1's "wobble" —
+   gate/scale them by the speech envelope. → Q7b.
+
+### 0.5.1 Server ground truth (nyx-chat-server code audit, 2026-07-06)
+
+Read from `C:/Users/AntoniosMakrodimitra/Desktop/nyx-chat-server`. This
+CORRECTS §0.2's server→widget mapping table and revises audit item 7.
+
+**The server only ever sends TWO avatar states:**
+- `Responding` — `chat_session.py:209`, fired on `_handle_response_start`
+  (first content back from the upstream agent).
+- `Listening` — `chat_session.py:353` (end of `_handle_response_end`, i.e.
+  "avatar finished talking") and `chat_session.py:514` (on barge-in).
+- **`Thinking` / `Processing` / `Idle` are NEVER sent.** The widget's
+  stateMap entries for them (ChatManager ~373) are dead code.
+
+**There is NO user-speech signal in the protocol at all.** "Listening" means
+"my turn ended", not "the user is speaking". While the user talks, the widget
+receives ZERO events: Gemini's live input transcription is BUFFERED
+server-side (`gemini/sample_agent.py:409-413`) and only flushed when the
+MODEL starts responding (456-458). VAD lives upstream at the provider
+(Gemini `START/END_SENSITIVITY_LOW` — deliberately conservative,
+`gemini_settings.py:64-65`; OpenAI `semantic_vad`, default silence 500 ms,
+`openai_settings.py:55,61`, threshold params commented out in
+`openai/sample_agent.py:141-143`). OpenAI's
+`input_audio_buffer.speech_started/stopped` events exist but are only used in
+a debug skip-list (`openai/sample_agent.py:244-245`).
+
+**Additional pathologies found:**
+- **"Responding" can fire on Gemini THOUGHT text before any audio.**
+  `response_start` triggers on any `model_turn` content
+  (`gemini/sample_agent.py:452`), and the preview native-audio model emits
+  thinking text as model_turn parts (ignored at 486-490, but the packet still
+  starts the turn). So the widget enters the SPEAKING pack while Gemini is
+  still thinking silently — the silent-Responding pathology, confirmed with
+  mechanism (not via the stateMap as §0.2 implied). Corollary: those
+  thought-text packets are a ready-made, zero-cost **Thinking trigger**.
+- **`Listening` (turn-end) trails real audio end by ≥750 ms**: response_end
+  waits for audio stabilization (15 × 50 ms polls, `chat_session.py:282`)
+  plus queue/frame-task drains before sending the state.
+- **Client-side race at playback end**: the widget's playback-drain handler
+  writes `Idle` locally (ChatManager ~784) at roughly the same time the
+  server's `Listening` arrives — last writer wins, so end-of-turn state is
+  nondeterministic (`Idle` vs `Listening`).
+- **Barge-in**: server sends `interrupt` then `avatar_state: Listening`
+  immediately (good, matches Cao et al.), but the widget's interrupt path
+  forces `Idle` in between (`stopAllPlayback`, ChatManager ~739) — transient
+  flap, and the final state depends on message-handling order.
+
+**Options for a user-speech signal (revises audit item 7):**
+1. **Widget-local mic RMS/VAD tap** — audio is already captured in-browser
+   for streaming; latency ~1 frame; provider-independent; no protocol change.
+2. **Protocol upgrade** — forward provider events: OpenAI `speech_started`/
+   `speech_stopped` (clean), Gemini first `input_transcription` delta
+   (approximate, ASR-lagged) + thought-text→`Thinking`. Latency = provider
+   VAD/ASR + backhaul; provider-dependent.
+3. **Both (layered, literature-preferred)**: local signal drives fast gaze/
+   nod reactions; server events stay authoritative for turn semantics.
 
 ---
 
@@ -441,6 +567,48 @@ Reference table of distinct head-motion primitives during conversation. Each has
 
 ---
 
+## Q7b — Speaker vs listener vs idle: motion-energy norms (added 2026-07-06)
+
+Verification pass for the energy-inversion problem (§0.4 obs 2) and the
+Listening sway amplitudes.
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Hadar et al. 1983/84 (goniometry) | Head moves in **89.9% of frames while speaking** vs **12.8% while listening** (~7:1 movement-time ratio). Amplitude correlates with peak loudness. | https://link.springer.com/article/10.1007/BF00986881 | High |
+| Hládek & Seeber 2025 (dyadic mocap) | Listener head motion ≈ nods only; "shaking, tilting, turning almost completely absent during listening". Listener "no movement" 40–50% of time vs speaker ~30%. | https://www.arxiv.org/pdf/2512.03636 | High |
+| Active Listener 2024 (IEMOCAP) | Listener head motion is single-digit degrees: MAE roll 3.41°, pitch 4.00°, yaw 6.24°. Human-like response lag <250 ms. | https://arxiv.org/html/2409.20188v1 | High |
+| Frontiers 2023 review | Listening nods −3° (flexion) to +15° (extension) pitch; listener–speaker pitch coherence 0.2–1.1 Hz at ~0.6 s lag; fast nods 2.6–6.5 Hz. Roll ROM ±35–40° is ANATOMICAL max, not conversational use. | https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2023.1183303/full | High |
+| Yamamoto 2015 + PLOS One 2019 (quiet stance) | Idle human sway: dominant ~0.3 Hz; trunk RMS 3–7 mm → angular ≈ **0.3–0.6°** (derived from geometry, not cited directly). | https://pmc.ncbi.nlm.nih.gov/articles/PMC4393163/ | High (Hz) / Med (deg) |
+| Perlin & Goldberg 1996 (Improv) | Idle = coherent noise at octave-spaced frequencies (~1, 2, 4 cyc/s layers); listening behavior re-picks stance/gesture every **3–12 s**. Believability = matching the STATISTICS of motion, not exact trajectories. | https://www.cs.princeton.edu/courses/archive/spr01/cs598b/papers/perlin96.pdf | High |
+| Egges, Molet, Magnenat-Thalmann 2004 | Idle = two layers: small continuous posture variation + occasional balance/weight shift. (Exact degrees locked in PCA space — not extractable.) | https://ieeexplore.ieee.org/document/1348342/ | High (classes) |
+| Tam et al. 2014 | Seated posture-shift cadence ≈ every **2.5 min** (older adults, static sitting). | https://www.resna.org/sites/default/files/conference/2014/Wheelchair%20Seating/Tam.html | Med |
+| Gratch et al. 2007 (Rapport Agent) | Listener policy = prosody-CONTINGENT nods + mirroring; contingency beats frequency (non-contingent feedback → speaker disfluencies 22.2 vs 11.8). No amplitudes published. Bailenson & Yee: 4 s mirror delay effective. | https://people.ict.usc.edu/~nwang/PDF/GratchIVA07-rapport.pdf | High |
+| Speech-breathing literature | Rest breathing ~0.17–0.30 Hz; during speech irregular, inhalations at phrase boundaries (NOT periodic). Breathing head-pitch: no published value; reasoned **<1°** (estimate). | https://pmc.ncbi.nlm.nih.gov/articles/PMC11999658/ | High (Hz) / Low (deg) |
+
+**Design law (energy ordering): Speaking > Listening > Idle — and steep.**
+~7:1 speaking:listening movement-time; idle ≈ sub-1° at ~0.3 Hz.
+
+**Verdicts on current constants:**
+- `LISTEN_SWAY.rollPeakDeg = 8` — no basis; misapplies the Q7 catalog's
+  step-and-hold empathy-tilt amplitude (8–15°) to a continuous oscillation.
+  Listening should be intermittent pitch nods over a near-still baseline.
+- `SPEECH_HEAD.breathePeakDeg = 3` / `LISTEN_SWAY.breathePeakDeg = 1` — too
+  large for head pitch; breathing reads in chest/shoulders, <1° at the head,
+  phrase-locked (not sinusoidal) during speech.
+- `SPEECH_HEAD.yawSlowPeakDeg = 6`, `rollPeakDeg = 5` — inside single-digit
+  norms, but running speech-INDEPENDENT is the defect; gate/scale by the
+  speech envelope. Head-locked rig inflates visible block angles — treat
+  published values as upper bounds.
+- Idle target if driven procedurally: ≤1° total, ~0.3 Hz carrier,
+  Perlin-style octave noise (not pure sines), posture-shift event every
+  ~10 s–2 min.
+
+**Honest negatives:** no published speaker:listener AMPLITUDE ratio in degrees
+(only movement-time); no breathing head-pitch degrees; Egges amplitudes not
+extractable (PCA space); Gratch publishes contingency/timing, not amplitudes.
+
+---
+
 # PART III — Eye gaze for conversational avatars
 
 ## Q8 — Eyes Alive / mutual-gaze ratios
@@ -477,6 +645,42 @@ Foundation paper for procedural eye-gaze in conversational avatars.
 - Pejsa, Mutlu, Andrist 2013 *Stylized and Performative Gaze* — https://www.researchgate.net/publication/235838994
 - Andrist et al. 2012 *Look Like Me* — https://dl.acm.org/doi/10.1145/2157689.2157810
 - Truong, Poppe, Heylen 2010 *Automatic Backchannel Timing* — https://research.utwente.nl/files/6450290/Truong10automatic.pdf
+
+---
+
+## Q8b — Aversion cadence, microsaccade reality, eye-head coupling & VOR (added 2026-07-06)
+
+Verification pass for §0.4 obs 3 ("gaze changes far too frequently").
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Andrist, Tan, Gleicher, Mutlu 2014 (HRI '14; human dyad corpus, read in full) | **Cognitive** aversion: 3.54 s ± 1.26, starts −1.32 s ± 0.47 before the cognitive event. **Intimacy** aversion speaking: 1.96 s ± 0.32 every **4.75 s** ± 1.39; listening: 1.14 s ± 0.27 every **7.21 s** ± 1.88. **Floor-management**: 2.30 s ± 1.10; mutual gaze re-engaged **2.41 s ± 0.56 BEFORE** the end of a floor-passing utterance. Aversion magnitudes (head-only robot): vertical ≈20°, horizontal 28°, downward 22°; frequent intimacy aversions scaled **×0.4** because human versions are "more subtle eyes-only motions". | https://pages.cs.wisc.edu/~bilge/pubs/2014/HRI14-Andrist.pdf | High |
+| Collewijn & Kowler 2008 | Microsaccades: 2–12 arcmin, median ~4.5 arcmin (**~0.075°**), classical cutoff ~0.25° (15 arcmin); calling 0.5–2° saccades "microsaccades" is "completely out of context". Rate 1–3/s. | https://pmc.ncbi.nlm.nih.gov/articles/PMC3522523/ | High |
+| Freedman & Sparks 1997 | Head does NOT contribute to gaze shifts **<20°**; recruitment rises linearly above; eye amplitude saturates ~35°. | https://pubmed.ncbi.nlm.nih.gov/9163361/ | High |
+| Pejsa, Andrist, Gleicher, Mutlu 2015 (ACM TiiS, read in full) | OMR 45–55°; head starts 0–100 ms AFTER eyes (visual targets); default velocities eye 150°/s, head 50°/s, trunk 15°/s. **Implements VOR explicitly**: "the eyes automatically move in the opposite direction to compensate and maintain their lock on the target". | https://graphics.cs.wisc.edu/Papers/2015/PAGM15/tiis15-pejsa.pdf | High |
+| Argyle & Cook 1976 (via Frontiers 2021 review) | Gaze at partner ~60% overall, ~30% mutual; **71% listening / 41% speaking**; glances ~3 s, mutual episodes ~1 s. | https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2021.616471/full | Med |
+| Mutlu et al. 2009 (Footing) | Robot gaze built from human proportions: turn-yielding gaze read correctly 99% of the time; offered turns taken 97%. | https://pages.cs.wisc.edu/~bilge/pubs/2009/HRI09-Mutlu-Footing.pdf | Med |
+| Trutoiu et al. 2011 | Blink DYNAMICS only: fast close / slow open, preferred duration ≈300 ms (9 frames @30 fps), rates 6.6–27/min across actors. Does NOT establish blink–saccade coupling (don't cite it for that). | https://la.disneyresearch.com/wp-content/uploads/Modeling-and-Animating-Eye-Blinks-Paper.pdf | High |
+| Gaze-evoked blink physiology (J Neurophysiol 1998; Exp Brain Res 2011) | Blink probability rises with gaze-shift amplitude (~20%+ for large shifts). At our small amplitudes, omitting blink–gaze coupling is defensible. | https://journals.physiology.org/doi/full/10.1152/jn.1998.79.6.2895 | Med |
+
+**Verdicts on current constants:**
+- `SACCADE_MICROSACCADE_DEG = 3` is a **mislabel**: 12× the classical
+  microsaccade bound; every mutual re-pick is a visible re-fixation saccade.
+  True microsaccades (≤0.25°) are below render salience — drop to ≤0.25° or
+  remove per-re-pick jitter entirely.
+- Re-pick cadence ~2–3 s is **5–10× more frequent** than measured human
+  aversion cadence (4.75 s speaking / 7.21 s listening, holds of 1–2 s).
+- Eyes-only architecture is CORRECT below ~20° (all our shifts qualify), but
+  the missing **VOR term** means procedural head sway drags gaze —
+  continuous, speech-locked drift layered on the saccades. Counter-rotate
+  the eyeLook channels by the procedural head delta.
+- Andrist's ×0.4 eyes-only scaling validates subtle amplitudes for FREQUENT
+  aversions — but "frequent" is still ~5–7 s apart.
+
+**Honest negatives:** Masuko & Hoshino parameters unverifiable (no open
+source); Peters & Qureshi "97% blink at >33°" is a single indexed mention
+(Low); Eyes Alive listening holds (~237.5 frames mutual / ~13 away) from
+indexed full text, not opened directly.
 
 ---
 
@@ -713,6 +917,131 @@ Fix script: `LAM/tools/fix_template_body_weights.py` — Blender headless, K-nea
 
 ---
 
+# PART VIII — Turn-taking timing, latency displays, interruption (added 2026-07-06)
+
+## Q22 — Turn-transition timing vs server-authoritative state
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Levinson & Torreira 2015 | Modal floor-transfer offset **100–200 ms** (typical gaps 100–300 ms); Switchboard gaps median 205 ms, mean 275 ms; speech-production latency 600–1500 ms → humans plan responses IN OVERLAP with the incoming turn. | https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2015.00731/full | High |
+| Skantze 2021 (review) | Dialogue-system endpoints typically **700–1000 ms** of silence — simultaneously sluggish AND interruption-prone; 200 ms human gaps require PREDICTION, not reaction. | https://www.sciencedirect.com/science/article/pii/S088523082030111X | Med-High (full text paywalled; corroborated) |
+| Roberts et al. 2013 | Silence >**600 ms** after a request already reads as unwillingness (n=380; significant degradation 700–800 ms). | https://pubmed.ncbi.nlm.nih.gov/23742442/ | High |
+| Holler & Kendrick 2015 | Listener gaze shift to next speaker: modal **−50 ms** (BEFORE turn end); >60% predictive. (Caveat: triadic, unaddressed-participant data.) | https://pmc.ncbi.nlm.nih.gov/articles/PMC4321333/ | High |
+| Hadley et al. 2022 | HEAD turns toward the new talker are legitimately slow: mean **+0.81–0.87 s** after speech offset; only ~17% begin before turn end. | https://pmc.ncbi.nlm.nih.gov/articles/PMC9807761/ | High |
+| Gravano & Hirschberg 2011 | Turn-yielding cues live in the **final 200–300 ms** of speech; turn-taking-attempt probability rises linearly with cue count (r²=0.969); 80% of overlapping starts begin during the final word. | https://www.utdt.edu/ia/integrantes/agravano/files/gravano_hirschberg_2011.pdf | High |
+| Skantze & Irfan 2025 (VAP) | Predictive turn-taking vs silence threshold: median response **1.5 s vs 2.7 s**; perceived interruptions **6.9% vs 16.6%**; predictive preferred p<0.001. | https://arxiv.org/html/2501.08946v1 | High |
+| Schlangen & Skantze 2009/11; Skantze & Hjalmarsson 2010 | Incremental principle: react to PARTIAL input, don't gate fast behavior on authoritative pipeline states. Incremental speech onset 0.58 s vs 2.84 s; **50 ms** micro-silence threshold for fast reactions running alongside the slow authoritative endpoint. | https://aclanthology.org/W10-4301/ | High |
+| Thórisson (Ymir/Gandalf) | Layered timing budgets: reactive layer **<500 ms** perceive-act cycles (gaze, small gestures); process/dialogue layer 0.5–2 s. | http://alumni.media.mit.edu/~kris/ftp/CompModTurnTak.pdf | High |
+
+**Implication:** eye-gaze reactions at turn boundaries belong in a
+WIDGET-LOCAL reactive layer (mic VAD/RMS, 50–200 ms loop); server state is
+the slower authoritative corrector. Head/posture may legitimately follow at
++0.8 s — matching human layering. Our current single path (server endpoint +
+WS round trip) lands ~1 s+, outside natural listener-reaction windows.
+
+## Q23 — "Thinking" displays during system latency
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Shiwa et al. 2008/2009 | User preference peaks at **1 s** response time; robot should react ≤**2 s**; conversational filler moderates long-delay penalties. | https://link.springer.com/article/10.1007/s12369-009-0012-8 | High |
+| Andrist et al. 2014 | Correct thinking display = **cognitive gaze aversion, predominantly UPWARD**, 3.54 s, starting ~1.3 s before the response. Well-timed: users waited 608 ms before interrupting vs 329 ms (static or badly timed). **Badly-timed aversions rated WORSE than static gaze** (F=27.97, p<.001). Silent display alone never survived a 2–4 s pause uninterrupted. | https://pages.cs.wisc.edu/~bilge/pubs/2014/HRI14-Andrist.pdf | High |
+| Kum & Lee 2022 (VR digital human) | Thinking-gesture fillers reduce perceived latency (all p<0.001); context-MISMATCHED gestures INCREASE it (p=0.004). | https://www.mdpi.com/2076-3417/12/21/10972 | High |
+| Glémarec et al. 2025 | Thinking filler beats idle base: response-time appropriateness 5.83 vs 4.04 (p<0.001); preferred by 66.7% vs 8.3% for base idle. | https://arxiv.org/html/2508.11781v1 | High |
+| Lee et al. 2025 (LLM IVAs) | Latency >**4 s** degrades experience; natural fillers (head turn, chin touch, "Hmm…") preferred by 64.8%; an artificial spinner did NOT help. | https://arxiv.org/html/2507.22352v1 | High |
+
+**Implication:** Thinking→Responding aliasing runs the WRONG parameter pack
+per every source found; a dedicated Thinking display (upward aversion +
+optional audio filler) is among the best-attested wins available. Unnecessary
+below ~1 s, engage by ~2 s, mandatory above ~4 s.
+
+## Q24 — Barge-in / interruption handling
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Cao et al. 2025 | 76% of user interruptions are disruptive; human YIELD = stop speaking + **prolonged MUTUAL GAZE at the interrupter**; HOLD = gaze aversion; overlap in the final **2 s** of planned speech = normal turn-taking, not interruption. | https://arxiv.org/html/2501.01568v1 | High |
+| Crook et al. 2010 (Companions ECA) | On barge-in: pause TTS immediately + reactive facial expression, then continue/replan/abort. (Thresholds not published.) | https://www.csc.kth.se/~jboye/publications/aamas2010_interruptions.pdf | High |
+| LiveKit 2025 (industry) | Median **216 ms** of audio to classify a barge-in; **51% of naive VAD barge-ins are false positives** (backchannels, coughs) — validate 200–500 ms before killing playback. | https://livekit.com/blog/adaptive-interruption-handling | High (vendor) |
+
+**Implication:** our barge-in path (`stopAllPlayback`→Idle) is wrong twice:
+state should go to attentive-mutual-gaze Listening (not Idle), and there is
+no validation window.
+
+## Q25 — Dwell time / hysteresis / mid-ramp policy
+
+**Honest negative:** no published dwell/hysteresis constants exist for
+social-agent behavior FSMs (games or HRI). Defensible assembled bounds:
+- **200–300 ms debounce** on state events (Fry 1975: 210 ms minimum human
+  verbal reaction).
+- **≥1 s minimum dwell** for display states (shortest meaningful gaze event
+  1.14 s, Andrist 2014).
+- **500 ms overlap-classification window** before acting on barge-in
+  (LiveKit).
+- A mid-transition interruption policy MUST exist, whatever the values —
+  Unity exposes it as first-class config (Interruption Source):
+  https://docs.unity3d.com/Manual/class-Transition.html
+
+---
+
+# PART IX — Transition mechanics & FSM implementation practice (added 2026-07-06)
+
+## Q26 — Inertialization vs crossfade vs fade-through-zero
+
+| Source | Load-bearing claim WITH NUMBERS | URL | Confidence |
+|---|---|---|---|
+| Bollo, GDC 2018 (primary slides) | Inertialization: at switch, capture pose offset x₀ + velocity v₀ (1 frame of pose history); decay to zero with a quintic; overshoot guard t₁=min(t₁, −5x₀/v₀); worked examples t₁ = 0.3–0.5 s. Mid-transition interruption = **"fire and forget": re-inertialize from the CURRENT OUTPUT**, never stack transitions. Goals: momentum preservation; "no changes when not transitioning". | https://media.gdcvault.com/gdc2018/presentations/bollo_david_inertialization_high_performance.pdf | High |
+| Engine defaults | UE state-machine transition default **0.2 s**; Unity Animator default **0.25 s**; Holden "dead blending" cites 0.2 s as a normal blend time. | https://theorangeduck.com/page/dead-blending | Med-High |
+| BML 1.0 spec | Block composition = **MERGE (default) / APPEND / REPLACE**; only REPLACE reverts to a neutral state first — the bluntest mode. | https://projects.cs.ru.is/projects/behavior-markup-language/wiki | High |
+| SmartBody (AAMAS 2008) | Interrupt = schedule edits on blend weights; base Pose controller of indefinite duration "to which it returns when there are no overriding motions" — endorses identity-delta idle FOR THE NECK layer (not for gaze: gaze persists until redirected). | https://www.ifaamas.org/Proceedings/aamas08/proceedings/pdf/paper/AAMAS08_0779.pdf | High |
+| Kopp et al. 2014 (BMLA/AsapRealizer) | `bmla:parametervaluechange` retargets a RUNNING behavior without restart; graceful interruption = retraction, not halt; anticipation constant **0.1 s** (start speaking 0.1 s before predicted turn end). | https://noah.nrw/ubbihs/download/pdf/5127974 | High |
+
+**Verdict on our two-phase ramp:** fade-through-zero has **zero instances**
+in the industry/academic record — the only revert-to-neutral precedent is
+BML REPLACE, the bluntest composition mode. Correct pattern = single-phase
+interpolation of the PARAMETER PACK old→new over 200–300 ms, oscillators
+phase-continuous (= Anguelov "merge" / BMLA parametervaluechange); where the
+pose delta must jump, inertialize from current output. This also fixes the
+doc/code mismatch at `GaussianAvatar.ts` ~581-590 (procedural→procedural
+transitions compute the NEW state in both phases: formula snap + neutral dip).
+Mitigating nuance: our "zero" is identity-delta over a live baked clip, not a
+T-pose — and never summing old+new oscillators incidentally avoids beating.
+
+## Q27 — Runtime clip amplitude scaling (idle-energy fix path)
+
+| Source | Load-bearing claim | URL | Confidence |
+|---|---|---|---|
+| three.js official example + docs | `AnimationUtils.makeClipAdditive(clip)` (delta vs frame 0) + `setEffectiveWeight(0..1)` = continuous runtime amplitude knob over a base pose; example crossfades base actions at 0.35 s. | https://threejs.org/docs/#api/en/animation/AnimationUtils.makeClipAdditive | High |
+| three.js forum | Setting `AdditiveAnimationBlendMode` WITHOUT `makeClipAdditive` → overscaled bones. The delta conversion is mandatory. | https://discourse.threejs.org/t/changing-animationactions-blendmode-to-additiveanimationblendmode-leads-to-incorrect-results/46994 | High |
+| UE Layered Animations | Additive delta scaled by a runtime Alpha — same knob, cross-engine precedent. | https://dev.epicgames.com/documentation/unreal-engine/using-layered-animations-in-unreal-engine | Med-High |
+
+**Honest negative:** no published case study of runtime-attenuating an
+over-animated idle BASE clip instead of re-authoring ("fix it in data" is the
+unwritten norm) — but the machinery is first-class in our renderer's stack.
+
+## Q28 — Phase handling when blending procedural motion
+
+- PFNN (Holden, Komura, Saito 2017): blending misaligned-phase cyclic motion
+  "dies out" toward the mean pose → carry ONE phase variable across blends.
+  https://www.pure.ed.ac.uk/ws/files/35467734/phasefunction.pdf
+- Audio-synthesis practice: never jump amplitude; ramp ≥10–30 ms with
+  continuous phase. Our current pattern (phase-continuous oscillators,
+  amplitude-only ramps) is CORRECT. If moving to single-phase pack
+  interpolation, interpolate frequency slowly or share a phase accumulator to
+  avoid transient beating.
+
+## Q29 — Anguelov "orders" pattern (verified from full chapter, 2026-07-06)
+
+Gameplay orders are **fire-and-forget**; SAME-type order → **merge** (update
+the running behavior's parameters in place, no restart); DIFFERENT-type →
+terminate old via its stop stage + crossfade to new; order spam absorbed by
+overwrite ("greatly reduces the visual glitches"). Translation logic
+(state→blend weights, input damping) lives in the ANIMATION layer, not
+gameplay. Mapping to us: parameter tweaks within a state = merge (no ramp);
+state change = ONE blend; `setChatState` spam = overwrite policy — and the
+~10 writers need a single arbitration point.
+http://www.gameaipro.com/GameAIPro2/GameAIPro2_Chapter12_Separation_of_Concerns_Architecture_for_AI_and_Animation.pdf
+
+---
+
 # Appendix — Master citation list (alphabetised, deduplicated)
 
 (Build this by running `grep -oE 'https?://\S+' THIS_FILE | sort -u` if you need a flat list later.)
@@ -725,5 +1054,7 @@ Fix script: `LAM/tools/fix_template_body_weights.py` — Blender headless, K-nea
 - For losses / model knobs, include the exact value if cited (e.g. NVIDIA's `emotion_strength=0.6`).
 - For honest negatives (failures), include them too. The most useful research is "X tried Y, it failed because Z."
 
-**Last comprehensive update:** 2026-06-11 night session.
+**Last comprehensive update:** 2026-07-06 — four-agent literature
+verification + expansion (added §0.5 design audit, Q7b, Q8b, Parts VIII–IX).
+Previous: 2026-06-11 night session.
 - https://yelzkizi.org/metahuman-facial-motion-with-faceware/

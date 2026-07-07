@@ -28,6 +28,7 @@ import { CHAT_TIMING } from '../constants/chat';
 import { SubtitleController } from './SubtitleController';
 import { TranscriptManager } from './TranscriptManager';
 import { VoiceInputController } from './VoiceInputController';
+import { AvatarStateArbiter } from './AvatarStateArbiter';
 
 const log = logger.scope('ChatManager');
 
@@ -63,6 +64,8 @@ export class ChatManager implements Disposable {
   private subtitleController: SubtitleController;
   private transcriptManager: TranscriptManager;
   private voiceController: VoiceInputController;
+  // Single admission point for all chat-state writes (see AvatarStateArbiter)
+  private stateArbiter: AvatarStateArbiter;
 
   // Session state
   private currentSessionId: string | null = null;
@@ -72,6 +75,11 @@ export class ChatManager implements Disposable {
   private audioStartReceived: boolean = false;
   private useSyncPlayback = true;
   private playbackEnded = false;
+  // The server's audio_end is the authoritative end-of-turn signal. Local
+  // buffer underruns (the gaps between multi-segment answers) must not be
+  // mistaken for the turn ending, or the widget tears the turn down and
+  // rebuilds it mid-answer.
+  private serverStreamClosed = false;
   private syncFramesBeforeStart: number = 0;
   private wasInterrupted: boolean = false;
   private interruptCutoffMs: number | null = null; // Cutoff offset when interrupted
@@ -170,11 +178,17 @@ export class ChatManager implements Disposable {
       onScrollToBottom: () => this.scrollToBottom()
     });
 
+    // All chat-state writes go through the arbiter; only admitted
+    // transitions reach the avatar.
+    this.stateArbiter = new AvatarStateArbiter(
+      (state, source) => this.avatar.setChatState(state, source)
+    );
+
     this.voiceController = new VoiceInputController({
       audioInput: this.audioInput,
       protocolClient: this.protocolClient,
       micBtn: this.micBtn,
-      onRecordingStart: () => this.avatar.setChatState('Idle'),
+      onRecordingStart: () => this.stateArbiter.request('Idle', 'mic-record-start'),
       onError: options.onError
     });
 
@@ -196,7 +210,7 @@ export class ChatManager implements Disposable {
     try {
       await this.protocolClient.connect();
       log.info('WebSocket connected');
-      this.avatar.setChatState('Idle');
+      this.stateArbiter.request('Idle', 'ws-connect');
       // Don't request mic permission eagerly - wait for user to click mic button
     } catch (error) {
       errorBoundary.handleError(error as Error, 'chat-manager');
@@ -229,12 +243,12 @@ export class ChatManager implements Disposable {
       await this.protocolClient.connect();
       log.info('Reconnected on expand');
     }
-    this.avatar.setChatState('Idle');
+    this.stateArbiter.request('Idle', 'expand-reconnect');
     this.startBlendshapeSync();
   }
 
   resetOnMinimize(): void {
-    this.stopAllPlayback();
+    this.stopAllPlayback('minimize');
 
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -246,11 +260,13 @@ export class ChatManager implements Disposable {
     log.info('Disconnected on minimize');
 
     this.avatar.disableLiveBlendshapes();
-    this.avatar.setChatState('Idle');
+    this.stateArbiter.request('Idle', 'minimize');
     this.subtitleController.clear();
   }
 
   dispose(): void {
+    this.stateArbiter.dispose();
+
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -377,7 +393,7 @@ export class ChatManager implements Disposable {
         'Processing': 'Responding',
         'Responding': 'Responding',
       };
-      this.avatar.setChatState(stateMap[event.state] || 'Idle');
+      this.stateArbiter.request(stateMap[event.state] || 'Idle', `server:${event.state}`);
     });
 
     this.protocolClient.on('audio_start', (event: AudioStartEvent) => {
@@ -436,6 +452,10 @@ export class ChatManager implements Disposable {
     this.syncFramesBeforeStart = 0;
     this.wasInterrupted = false;
     this.interruptCutoffMs = null; // Reset interrupt cutoff for new turn
+    // New turn: the stream is open again, and any underrun flag from the
+    // previous turn is stale.
+    this.serverStreamClosed = false;
+    this.playbackEnded = false;
 
     // Cancel any pending scheduled stopAllPlayback from previous interrupted turn
     if (this.scheduledStopTimeout !== null) {
@@ -463,7 +483,7 @@ export class ChatManager implements Disposable {
 
     this.useSyncPlayback = false;
     this.avatar.enableLiveBlendshapes();
-    this.avatar.setChatState('Responding');
+    this.stateArbiter.request('Responding', 'audio-start');
 
     // Process any transcript_deltas that arrived before audio_start
     if (this.earlyTranscriptBuffer.length > 0) {
@@ -493,7 +513,7 @@ export class ChatManager implements Disposable {
       this.currentSessionId = event.sessionId;
       this.syncPlayback.startSession(event.sessionId);
       this.avatar.enableLiveBlendshapes();
-      this.avatar.setChatState('Responding');
+      this.stateArbiter.request('Responding', 'sync-frame-adapt');
       this.setTyping(false);
     }
 
@@ -515,6 +535,10 @@ export class ChatManager implements Disposable {
 
   private handleAudioEnd(event: AudioEndEvent): void {
     log.info('Audio end received - marking stream complete');
+
+    // Authoritative end-of-turn: from here a drained buffer means the turn
+    // is genuinely over (vs. a mid-answer segment gap).
+    this.serverStreamClosed = true;
 
     // Reset for next turn
     this.audioStartReceived = false;
@@ -650,14 +674,14 @@ export class ChatManager implements Disposable {
 
     if (msPlayed >= cutoffMs) {
       log.info(`  → Immediate stop (already past cutoff)`);
-      this.stopAllPlayback();
+      this.stopAllPlayback('interrupt-immediate');
     } else {
       const remainingMs = cutoffMs - msPlayed;
       log.info(`  → Scheduled stop in ${remainingMs.toFixed(0)}ms`);
       // Track the timeout so it can be cancelled if a new turn starts
       this.scheduledStopTimeout = window.setTimeout(() => {
         this.scheduledStopTimeout = null;
-        this.stopAllPlayback();
+        this.stopAllPlayback('interrupt-scheduled');
       }, remainingMs);
     }
   }
@@ -708,13 +732,14 @@ export class ChatManager implements Disposable {
     log.info(`📤 TURN START [user] | Text: "${text}"`);
 
     this.chatInput.value = '';
-    this.avatar.setChatState('Idle');
+    this.stateArbiter.request('Idle', 'text-send');
     this.transcriptManager.addMessage(text, 'user');
     this.protocolClient.sendText(text);
     this.setTyping(true);
   }
 
-  private stopAllPlayback(): void {
+  private stopAllPlayback(reason = 'unspecified'): void {
+    log.info(`[teardown] stopAllPlayback reason=${reason} turnId=${this.currentTurnId}`);
     this.syncPlayback.stop();
     this.audioOutput.stop();
     this.blendshapeBuffer.clear();
@@ -736,7 +761,7 @@ export class ChatManager implements Disposable {
     this.currentTurnId = null;
     this.audioStartReceived = false;
     this.avatar.disableLiveBlendshapes();
-    this.avatar.setChatState('Idle');
+    this.stateArbiter.request('Idle', 'stop-all-playback');
   }
 
   private startBlendshapeSync(): void {
@@ -749,15 +774,17 @@ export class ChatManager implements Disposable {
         this.avatar.updateBlendshapes(result.weights);
 
         if (result.status === 'SPEAKING' && this.avatar.getChatState() !== 'Responding') {
-          this.avatar.setChatState('Responding');
+          this.stateArbiter.request('Responding', 'raf-poll-speaking');
         } else if (result.status === 'LISTENING' && result.endOfSpeech) {
-          this.avatar.setChatState('Idle');
+          this.stateArbiter.request('Idle', 'raf-poll-eos');
         }
       }
 
-      // When playback ends and blendshapes are drained, do cleanup (but keep loop running)
-      if (this.playbackEnded && this.blendshapeBuffer.isEmpty()) {
-        log.info('Playback ended and buffer is empty. Cleaning up and setting state to Idle.');
+      // Turn cleanup runs only once the SERVER has closed the stream and the
+      // local buffer has drained. A drained buffer alone (a gap between
+      // multi-segment answers) is not the end of the turn.
+      if (this.serverStreamClosed && this.playbackEnded && this.blendshapeBuffer.isEmpty()) {
+        log.info('Stream closed and buffer empty. Cleaning up and setting state to Idle.');
 
         // Flush remaining transcript queue (only if not interrupted)
         if (!this.wasInterrupted) {
@@ -781,7 +808,12 @@ export class ChatManager implements Disposable {
           this.subtitleController.clear();
         }, 1500);
 
-        this.avatar.setChatState('Idle');
+        // The server's post-turn state is Listening (attentive, waiting for
+        // the user) — it never sends Idle during a conversation. This is only
+        // a safety net for a server that fails to send it; targeting
+        // Listening makes it a no-op when the server already did, instead of
+        // overriding the server's Listening with Idle.
+        this.stateArbiter.request('Listening', 'playback-drained');
         this.resetPlaybackState();
       }
 
@@ -791,6 +823,7 @@ export class ChatManager implements Disposable {
   }
 
   private resetPlaybackState(): void {
+    log.info(`[teardown] resetPlaybackState turnId=${this.currentTurnId} wasInterrupted=${this.wasInterrupted}`);
     this.playbackEnded = false;
     this.interruptCutoffMs = null;
     this.currentTurnId = null;

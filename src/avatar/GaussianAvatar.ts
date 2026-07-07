@@ -41,11 +41,15 @@ const SACCADE_BY_STATE: Record<ChatState, {
   awayMean: number;   awaySigma: number;
   magnitudeMaxDeg: number;
 }> = {
-  // Not talking → active gaze
+  // Not in conversation → calm, waiting gaze. A service avatar at rest
+  // should read as attentive toward the user, not scanning the room:
+  // long mutual holds with an occasional brief glance away (human
+  // conversational aversions recur on the order of 5-7 s and last 1-2 s;
+  // Andrist et al. 2014).
   'Idle': {
-    mutualMean: 1000, mutualSigma: 350, returnProb: 0.45,
-    awayMean:    250, awaySigma:   100,
-    magnitudeMaxDeg: 12,
+    mutualMean: 2500, mutualSigma: 600, returnProb: 0.70,
+    awayMean:    220, awaySigma:    80,
+    magnitudeMaxDeg: 8,
   },
   // User speaking → listener-focused gaze.
   // Lee & Badler "Eyes Alive" SIGGRAPH 2002: listeners hold mutual gaze ~75% of
@@ -66,9 +70,9 @@ const SACCADE_BY_STATE: Record<ChatState, {
   // Speakers look away ~60% of the time to plan / think / form words.
   // Numbers converted from centiseconds: 93.9cs→939ms, √94.9≈97ms σ, 27.8cs→278ms, √24.0≈49ms σ.
   'Responding': {
-    mutualMean: 939, mutualSigma: 97, returnProb: 0.41,
-    awayMean:   278, awaySigma:   49,
-    magnitudeMaxDeg: 12,
+    mutualMean: 1400, mutualSigma: 300, returnProb: 0.41,
+    awayMean:    278, awaySigma:    49,
+    magnitudeMaxDeg: 10,
   },
 };
 
@@ -79,8 +83,24 @@ const SACCADE_BY_STATE: Record<ChatState, {
 const SACCADE_DURATION_INTERCEPT_S = 0.025;
 const SACCADE_DURATION_SLOPE_S_PER_DEG = 0.0024;
 const SACCADE_DURATION_MIN_MS = 25;          // floor — never instantaneous
-const SACCADE_ARKIT_DEG_PER_UNIT = 30;       // ARKit eyeLook* value=1 ≈ 30° rotation
-const SACCADE_MICROSACCADE_DEG  = 3;         // ±3° jitter on mutual gaze — visible at render scale
+const SACCADE_ARKIT_DEG_PER_UNIT = 30;       // nominal ARKit scale — used in debug logs only
+// Eye morph rotation scales in degrees per unit of morph influence, measured
+// from the mesh (morph displacement ÷ eyeball radius; left eye, right
+// assumed mirrored). The rig's eye morphs are asymmetric (out ≠ in), so
+// driving both eyes with one shared value produces unequal binocular
+// rotation (vergence error). Estimates carry some eyelid-follow
+// contamination — refine empirically if gaze over/under-shoots.
+const EYE_DEG_PER_UNIT = { out: 21.4, in: 9.6, up: 14.2, down: 11.9 };
+// Jitter applied on each mutual-gaze re-pick. True microsaccades are
+// sub-degree (classical bound ~0.25°; Collewijn & Kowler 2008) — larger
+// values read as deliberate re-fixations and make steady gaze look flicky.
+const SACCADE_MICROSACCADE_DEG  = 0.25;
+
+// Gaze realization is renderer-side: the renderer solves a camera look-at
+// against the head bone's true world pose (baked clip + procedural delta)
+// and adds the behavioral offset provided via getGazeOffset. Widget-side
+// head compensation was removed — it could only see the procedural
+// component and would double-compensate once the look-at is active.
 
 // Pejsa et al. (Eurographics 2013, "Stylized and Performative Gaze") argue that
 // biological gaze parameters need to be SLOWED DOWN for character animation.
@@ -103,14 +123,16 @@ const GAZE_PACE_MULTIPLIER = 2.0;
 const PAUSE_RMS_THRESHOLD = 0.01;
 const PAUSE_ENTER_MS = 400;          // canonical 800ms canon, halved for TTS pauses
 const PAUSE_EXIT_MS = 100;
-const PAUSE_RMS_EMA_ALPHA = 0.4;     // strong smoothing; new samples at 30 Hz
 
 // During Responding-mode saccade picks, the returnProb (chance of staying on
 // mutual gaze) shifts based on whether we're in a pause:
 //   in fluent speech  → bias TOWARD listener (look at them while talking)
 //   in a pause        → bias AWAY (cluster gaze aversions at pauses)
-const RESPONDING_FLUENT_RETURN_PROB = 0.85;
-const RESPONDING_PAUSE_RETURN_PROB  = 0.25;
+// Strong mutual bias while speaking fluently; pauses still bias away but
+// gently — the avatar keeps focus on the user while talking, and the
+// look-away behavior belongs primarily to idle/thinking.
+const RESPONDING_FLUENT_RETURN_PROB = 0.92;
+const RESPONDING_PAUSE_RETURN_PROB  = 0.55;
 
 // ─── Procedural head/neck pose (v1 — see .claude/research/3dmm_transitions_and_state_machine.md §10) ──
 //
@@ -129,14 +151,18 @@ const RESPONDING_PAUSE_RETURN_PROB  = 0.25;
 // baseline (NOT on the nod transient — that would smear it).
 const DEG_TO_RAD = Math.PI / 180;
 
-// Listening baseline ("still listening" floor — visible motion so the avatar
-// reads as engaged). Catalog §12 amplitudes: empathy tilts 8-15°, attentive
-// nods 5-10°. Previous values (sub-degree) were below visibility threshold.
+// Listening baseline — near-still attentiveness. Listener heads are still
+// 40-90% of conversation time and listener motion is dominated by
+// intermittent pitch nods (Hadar et al. 1983; Hládek & Seeber 2025);
+// continuous roll oscillation has no empirical basis. The baseline stays
+// ≤~1° total and the cue-triggered nod below carries the visible
+// "listening" signal. The head-locked rig inflates visible angles, so err
+// small.
 const LISTEN_SWAY = {
-  yawHz1: 0.7,   yawHz2: 1.3,   yawPeakDeg: 3.0,   // was 0.8
-  pitchHz1: 0.5, pitchHz2: 1.1, pitchPeakDeg: 2.0, // was 0.5
-  breatheHz: 0.3,                breathePeakDeg: 1.0, // was 0.3
-  rollHz1: 0.25, rollHz2: 0.55, rollPeakDeg: 8.0,  // was 5.0 (now in catalog range)
+  yawHz1: 0.7,   yawHz2: 1.3,   yawPeakDeg: 1.0,
+  pitchHz1: 0.5, pitchHz2: 1.1, pitchPeakDeg: 0.7,
+  breatheHz: 0.3,                breathePeakDeg: 0.4, // breathing reads <1° at the head
+  rollHz1: 0.25, rollHz2: 0.55, rollPeakDeg: 0.8,
 };
 
 // Nod (damped sine; §4 — Ward & Tsukahara cue → 3-cycle damped sine).
@@ -150,46 +176,27 @@ const NOD = {
   triggerDelayMaxMs:   400,
 };
 
-// Responding driver — REV 2 (2026-06-11 evening).
-// REV 1 mapped absolute RMS level to absolute pitch position → head stayed
-// pinned at +5° the whole time the avatar talked. Wrong: real speakers MOVE
-// the head on speech BURSTS (stressed syllables), not on overall volume.
-//
-// REV 2 high-passes RMS: pitch is driven by (RMS - smoothed(RMS, slow)), i.e.
-// how much the current syllable rises above the surrounding average. Settles
-// back to zero between syllables. Pitch CHANGES with speech rhythm, doesn't
-// pin to level.
-// Responding driver — REV 3 (2026-06-11 night).
-// REV 2 high-passed RMS to get rid of "head pinned up" bias, but produced
-// nearly-zero output during steady speech (the slow EMA tracks the level
-// and the residual collapses). Live test confirmed ±1.4° pitch — invisible.
-//
-// REV 3 adds a "speech rhythm" pitch oscillator: while speech is active
-// (RMS > threshold) the head bobs at ~1.5 Hz with amplitude proportional to
-// the current RMS. This is the speech-rhythm pattern in McClave 2000 and
-// the classic visual-prosody finding (Munhall 2004 — head motion correlates
-// with F0 envelope at ~0.83 sentence-level). High-pass burst stays on top
-// for transients. Plus larger breathing, yaw drift, and roll.
+// Speech-driven head motion. A single energy envelope (ENERGY_* below) is the
+// only speech signal: it drives a low-frequency pitch bob whose amplitude
+// tracks loudness, and gates the slow yaw/roll drift. Continuous voice
+// co-motion is low-frequency (McClave 2000; Munhall 2004 — head motion
+// correlates with the F0/energy envelope at ~0.83 sentence-level). No discrete
+// per-syllable beat: it read as a fast forward jerk and any per-word nodding
+// on staccato speech is worse than a smooth carrier.
 const SPEECH_HEAD = {
-  // Speech-rhythm oscillator (gated by RMS > silenceThresh).
-  rhythmHz:            1.6,    // ~1.5 Hz = syllable rate
-  rhythmRmsToAmpScale: 90,     // RMS 0.05 → amp ≈ 4.5°; RMS 0.10 → ≈ 9°
-  rhythmAmpClampDeg:   10,     // hard cap
-  rhythmSilenceThresh: 0.005,  // gate: skip oscillator below this RMS
-  // High-pass burst (REV 2, kept for transients).
-  pitchBurstScale:     350,    // was 220
-  pitchBurstClampDeg:  8,      // was 6
-  slowRmsEmaAlpha:     0.04,   // ~1 s timescale
-  pitchReleaseAlpha:   0.35,   // faster release for visible motion
+  rhythmHz:            0.9,     // sub-1 Hz carrier reads as calm engagement
+  rhythmRmsToAmpScale: 35,      // envelope 0.05 → amp ≈ 1.8°; 0.10 → ≈ 3.5°
+  rhythmAmpClampDeg:   4,       // hard cap
+  gateRef:             0.03,    // envelope value that maps to full drift gate
   // Baselines.
   breatheHz:           0.4,
-  breathePeakDeg:      3.0,    // was 1.5
+  breathePeakDeg:      0.5,     // breathing reads <1° at the head
   yawSlowHz1:          0.4,
   yawSlowHz2:          0.95,
-  yawSlowPeakDeg:      6.0,    // was 3.0
+  yawSlowPeakDeg:      3.0,
   rollHz1:             0.18,
   rollHz2:             0.42,
-  rollPeakDeg:         5.0,    // was 2.5
+  rollPeakDeg:         2.5,
 };
 
 // Cervical distribution for roll (§2 biomech — slightly more even split than
@@ -200,12 +207,22 @@ const NECK_DIST_ROLL = {
   neckLower: 0.20,
 };
 
-// State-enter ramp duration (ms). Procedural amplitude ramps from 0 to 1 over
-// this window after a state change so the bones drift smoothly out of the
-// previous state's pose rather than snapping. The speak clip's body motion
-// also crossfades over ~0.5 s (renderer's blendingTime constant), so these are
-// matched.
-const STATE_ENTER_RAMP_MS = 500;
+// State-transition blend duration (ms). On any state change the neck output
+// eases from its current pose to the new state's pose in a single phase
+// (cubic-out) — never through neutral, never snapping between formulas.
+// 250 ms follows common engine transition durations (Unity 0.25 s crossfade,
+// Unreal 0.2 s; Bollo, GDC 2018 "Inertialization").
+const STATE_BLEND_MS = 250;
+
+// Energy envelope follower (per-frame EMA rates at ~60 Hz). One smoothed
+// signal is derived from the raw audio RMS and drives all speech-reactive
+// head motion. Computed at RENDER rate from the latest raw sample, so it is
+// immune to audio-callback burst timing. Asymmetric: quicker attack so the
+// head engages as speech starts, slow release so it settles rather than cuts
+// (fast attack / slow release is the standard envelope-follower shape).
+const ENERGY_ATTACK = 0.20;   // ~55 ms rise
+const ENERGY_RELEASE = 0.04;  // ~350 ms fall
+const ENERGY_FEED_STALE_MS = 150; // no fresh RMS for this long ⇒ treat as silence
 
 // Cervical distribution along chain. §2 biomech.
 const NECK_DIST = {
@@ -320,8 +337,6 @@ export class GaussianAvatar implements Disposable {
   // Audio-RMS-driven pause detection (Responding only). When the avatar is
   // speaking, the saccade scheduler consults `inSpeechPause` to bias away
   // glances toward actual pauses in the audio (Kendon turn-holding cue).
-  private smoothedAudioRMS = 0;                 // EMA over incoming RMS samples
-  private lastAudioRMSUpdateMs = 0;             // wall-clock of last audio sample
   private msInLowEnergy = 0;                    // contiguous ms below threshold
   private msInHighEnergy = 0;                   // contiguous ms above threshold
   private inSpeechPause = false;                // hysteretic pause state
@@ -352,23 +367,24 @@ export class GaussianAvatar implements Disposable {
   private readonly _pitchFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
   private readonly _yawFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
   private readonly _rollFilter = new OneEuroFilter(ONE_EURO_MIN_CUTOFF_HZ, ONE_EURO_BETA);
-  // High-pass state for the Responding RMS driver (REV 2). Slow EMA tracks
-  // overall speech level (~1s timescale); the residual (current - slow) is the
-  // burst signal that drives head pitch impulses.
-  private _slowRmsEma = 0;
-  private _pitchBurstEma = 0;
-  // State change tracker for the symmetric two-phase ramp:
-  //   0   → halfway through ramp: emit PREV state's pose, amplitude 1 → 0
-  //   half → end of ramp:         emit CURRENT state's pose, amplitude 0 → 1
-  // This mirrors the speak/idle clip authoring convention where every clip
-  // starts and ends at the same neutral pose, so the transition passes
-  // through the default position before the next state engages.
+  // Energy signal. updateAudioRMS only captures the latest raw sample; the
+  // smoothed envelope (_energyEnv) is advanced at render rate in getNeckPose
+  // and is the single source for all speech-reactive head motion.
+  private _rawRms = 0;
+  private _energyEnv = 0;
+  private _lastRmsUpdateMs = 0;
+  private _lastPauseUpdateMs = 0;
+  // State-transition blend: on state change, capture the current output pose
+  // and ease from it to the new state's live target (single phase,
+  // cubic-out). A change mid-blend re-captures the current output, so blends
+  // never stack and the pose never snaps.
   private _prevStateForRamp: ChatState = 'Idle';
-  private _stateChangeMs = 0;
-  // Used by the fade-out half: when we transition INTO Idle, we still need to
-  // emit the previous procedural pattern (Listening or Responding) for
-  // ~250 ms while decaying its amplitude. Captures the last non-Idle state.
-  private _lastNonIdleStateForFade: ChatState | null = null;
+  private _blendStartMs = 0;
+  private readonly _blendFromDeg = { pitch: 0, yaw: 0, roll: 0 };
+  private readonly _lastOutDeg = { pitch: 0, yaw: 0, roll: 0 };
+
+  // Behavioral gaze offset from the camera axis (degrees); see getGazeOffset.
+  private readonly _gazeOffset = { yawDeg: 0, pitchDeg: 0 };
   
   constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
     this._avatarDivEle = container;
@@ -396,6 +412,16 @@ export class GaussianAvatar implements Disposable {
     this.forceEyesClosed = true;
   }
 
+  /**
+   * Behavioral gaze offset from the camera axis, in degrees ({0,0} = mutual
+   * gaze at the camera). Consumed once per frame by the renderer's camera
+   * look-at, which solves the eye rotation against the head's true world
+   * pose and adds this offset. Returns a cached object — allocation-free.
+   */
+  public getGazeOffset(): { yawDeg: number, pitchDeg: number } {
+    return this._gazeOffset;
+  }
+
   public async render() {
     this._renderer = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
       this._avatarDivEle,
@@ -404,8 +430,11 @@ export class GaussianAvatar implements Disposable {
         getChatState: this.getChatState.bind(this),
         getExpressionData: this.getArkitFaceFrame.bind(this),
         getNeckPose: this.getNeckPose.bind(this),
+        // Supported by the current renderer build; not yet in the published
+        // package's type declarations, hence the cast below.
+        getGazeOffset: this.getGazeOffset.bind(this),
         backgroundColor: "0xffffff"
-      },
+      } as Parameters<typeof GaussianSplats3D.GaussianSplatRenderer.getInstance>[2],
     );
 
     if (this._backgroundImage) {
@@ -484,11 +513,24 @@ export class GaussianAvatar implements Disposable {
     return this.curState;
   }
   
-  public setChatState(state: ChatState): void {
+  // ─── State-write trace ──────────────────────────────────────────────────
+  // Counts every write (including redundant same-state writes) per source so
+  // state churn can be audited against real writer behavior. ISO timestamps
+  // allow correlation with server-side logs.
+  private _stateEnteredAtMs = performance.now();
+  private _stateWriteCounts: Record<string, number> = {};
+
+  public setChatState(state: ChatState, source = 'untagged'): void {
+    this._stateWriteCounts[source] = (this._stateWriteCounts[source] || 0) + 1;
     if (this.curState !== state) {
-      // Log with timestamp for easier debugging of animation state machine
-      const timestamp = new Date().toLocaleTimeString();
-      log.info(`[${timestamp}] Avatar state: ${this.curState} → ${state}`);
+      const nowMs = performance.now();
+      const dwellMs = Math.round(nowMs - this._stateEnteredAtMs);
+      log.info(
+        `[state-trace] ${new Date().toISOString()} ${source}: ${this.curState} → ${state}`
+        + ` | dwell=${dwellMs}ms | writesSinceLastChange=${JSON.stringify(this._stateWriteCounts)}`
+      );
+      this._stateWriteCounts = {};
+      this._stateEnteredAtMs = nowMs;
       const prev = this.curState;
       this.curState = state;
 
@@ -521,7 +563,7 @@ export class GaussianAvatar implements Disposable {
    */
   public disableLiveBlendshapes(): void {
     this.liveBlendshapeData = null;
-    log.debug('Live blendshapes cleared');
+    log.info('[teardown] live blendshapes cleared — face falls back to neutral');
   }
   
   /**
@@ -544,68 +586,83 @@ export class GaussianAvatar implements Disposable {
    *
    * Allocation-free: mutates cached _neckPoseResult in place.
    */
+  // Temporary diagnostic: reports renderer callback rates and within-frame
+  // call order every 5 s. The face frame is read before the neck pose each
+  // frame, so head-dependent eye logic lags the head by one frame.
+  private _t3 = { neck: 0, face: 0, faceThenNeck: 0, neckThenFace: 0, last: '' as '' | 'neck' | 'face', lastMs: 0, reportMs: 0 };
+
+  private _t3note(kind: 'neck' | 'face'): void {
+    const now = performance.now();
+    const t = this._t3;
+    t[kind]++;
+    if (t.last && t.last !== kind && now - t.lastMs < 8) {
+      if (kind === 'neck') t.faceThenNeck++; else t.neckThenFace++;
+    }
+    t.last = kind;
+    t.lastMs = now;
+    if (now - t.reportMs > 5000) {
+      if (t.reportMs > 0) {
+        log.info(`[T3] neck=${(t.neck / 5).toFixed(1)}/s face=${(t.face / 5).toFixed(1)}/s | order: face→neck=${t.faceThenNeck} neck→face=${t.neckThenFace}`);
+      }
+      t.neck = 0; t.face = 0; t.faceThenNeck = 0; t.neckThenFace = 0;
+      t.reportMs = now;
+    }
+  }
+
   public getNeckPose(): {
     head: [number, number, number],
     neckUpper: [number, number, number],
     neckLower: [number, number, number],
   } | null {
+    this._t3note('neck');
     const nowMs = performance.now();
 
-    // Detect state change → start the two-phase ramp.
+    // Advance the single energy envelope at render rate from the latest raw
+    // RMS. A stale feed (playback stopped) reads as silence, so the envelope
+    // releases smoothly to zero — no separate decay hack, no freeze. This is
+    // the only place the energy signal is smoothed; everything downstream
+    // reads _energyEnv.
+    const rawEnergy = (nowMs - this._lastRmsUpdateMs < ENERGY_FEED_STALE_MS)
+      ? this._rawRms : 0;
+    const envK = rawEnergy > this._energyEnv ? ENERGY_ATTACK : ENERGY_RELEASE;
+    this._energyEnv += envK * (rawEnergy - this._energyEnv);
+    this._updatePauseState(nowMs);
+
+    // ── State-transition blend ─────────────────────────────────────────────
+    // Baked clips loop start=end, so hard cuts between them still stitch. The
+    // procedural layer has no such guarantee, so on ANY state change the
+    // output eases from wherever the head currently is to the new state's
+    // live pose. Fire-and-forget: a change mid-blend re-captures the current
+    // output as the new blend source, so blends never stack. Oscillator phase
+    // (t below) stays continuous throughout.
     if (this.curState !== this._prevStateForRamp) {
-      // Don't reset filters mid-transition — keep them smoothing through the
-      // ramp so the per-axis 1€ output doesn't jump.
-      this._stateChangeMs = nowMs;
+      this._prevStateForRamp = this.curState;
+      this._blendFromDeg.pitch = this._lastOutDeg.pitch;
+      this._blendFromDeg.yaw   = this._lastOutDeg.yaw;
+      this._blendFromDeg.roll  = this._lastOutDeg.roll;
+      this._blendStartMs = nowMs;
+      // Cancel any nod in flight — it belongs to the previous state.
       this._nodPendingFireAtMs = 0;
       this._nodStartMs = 0;
-      // Snapshot the OUTGOING state for the fade-out phase; new state becomes
-      // the incoming target. Special-case Idle → x: skip the fade-out phase
-      // entirely (we were emitting null, nothing to fade from).
-      const wasIdle = this._prevStateForRamp === 'Idle';
-      this._prevStateForRamp = this.curState;
-      // Mark the change so the ramp computation below knows the elapsed time.
-      // wasIdle path: jump straight into fade-IN by back-dating the ramp by half.
-      if (wasIdle) this._stateChangeMs -= STATE_ENTER_RAMP_MS / 2;
     }
 
-    const msSinceChange = nowMs - this._stateChangeMs;
-    const rampHalf = STATE_ENTER_RAMP_MS / 2;
+    const blendT = this._blendStartMs === 0
+      ? 1
+      : Math.min(1, (nowMs - this._blendStartMs) / STATE_BLEND_MS);
+    const blendK = 1 - Math.pow(1 - blendT, 3); // cubic-out: settle, don't snap
 
-    // Phase selection:
-    //   msSinceChange < rampHalf:  emit the *previous* procedural state's pose,
-    //                              amplitude 1 → 0 (fade out to neutral)
-    //   msSinceChange >= rampHalf: emit the *current* procedural state's pose,
-    //                              amplitude 0 → 1 (fade in from neutral)
-    let computeState: ChatState;
-    let amplitude: number;
-    if (msSinceChange < rampHalf) {
-      // Fade-out half. If we're now Idle, the prev state was procedural and
-      // we should emit its decaying pose. If we're STILL in a procedural
-      // state (rare — happens only mid-transition), use the new state.
-      if (this.curState === 'Idle' && this._lastNonIdleStateForFade !== null) {
-        computeState = this._lastNonIdleStateForFade;
-      } else {
-        computeState = this.curState;
-      }
-      amplitude = 1 - (msSinceChange / rampHalf);
-    } else if (msSinceChange < STATE_ENTER_RAMP_MS) {
-      // Fade-in half. Use new state.
-      computeState = this.curState;
-      amplitude = (msSinceChange - rampHalf) / rampHalf;
-    } else {
-      // Past the ramp window — full amplitude.
-      computeState = this.curState;
-      amplitude = 1;
+    // Blend finished with an Idle target (= identity delta): hand the body
+    // fully back to the baked clip.
+    if (this.curState === 'Idle' && blendT >= 1) {
+      this._lastOutDeg.pitch = 0;
+      this._lastOutDeg.yaw = 0;
+      this._lastOutDeg.roll = 0;
+      return null;
     }
 
-    // If we're now in Idle AND past the ramp, return null so the baked clip
-    // drives entirely. Inside the ramp we keep emitting (with amplitude=0 at
-    // worst) so the bone glides to neutral instead of snapping.
-    if (this.curState === 'Idle' && msSinceChange >= rampHalf) return null;
-
-    // Remember the most recent procedural state so the fade-out half can
-    // continue emitting its pattern after we transition to Idle.
-    if (this.curState !== 'Idle') this._lastNonIdleStateForFade = this.curState;
+    // Targets are always computed from the CURRENT state's formulas; Idle's
+    // target is simply zero (the lerp below eases the pose down to it).
+    const computeState = this.curState;
 
     if (this._swayStartTimeMs === 0) this._swayStartTimeMs = nowMs;
     const t = (nowMs - this._swayStartTimeMs) / 1000;
@@ -635,44 +692,29 @@ export class GaussianAvatar implements Disposable {
         + 0.7 * Math.sin(2 * Math.PI * LISTEN_SWAY.rollHz2 * t)
       ) / 1.7 * LISTEN_SWAY.rollPeakDeg;
     } else if (computeState === 'Responding') {
-      // REV 3 PRIMARY: speech-rhythm pitch oscillator.
-      // Active whenever speech audio is above silence threshold. Amplitude
-      // scales with current RMS so quiet speech = small bobs, loud speech =
-      // big bobs. Frequency ~1.5 Hz approximates syllable rate (catalog §12,
-      // McClave OM band 1.9–3.6 Hz scaled down for "head-level" pitch motion).
-      if (this.smoothedAudioRMS > SPEECH_HEAD.rhythmSilenceThresh) {
-        const rhythmAmp = Math.min(
-          SPEECH_HEAD.rhythmAmpClampDeg,
-          this.smoothedAudioRMS * SPEECH_HEAD.rhythmRmsToAmpScale,
-        );
-        baselinePitchDeg += -rhythmAmp * Math.sin(2 * Math.PI * SPEECH_HEAD.rhythmHz * t);
-        // Negative sin so the head DIPS on stressed syllable downbeats (catalog
-        // §12: stress beat = down-dip).
-      }
-      // REV 2 SECONDARY: high-pass burst layered on top for transient emphasis.
-      this._slowRmsEma = SPEECH_HEAD.slowRmsEmaAlpha * this.smoothedAudioRMS
-                       + (1 - SPEECH_HEAD.slowRmsEmaAlpha) * this._slowRmsEma;
-      const burst = this.smoothedAudioRMS - this._slowRmsEma;
-      const rawPitchBurstDeg = Math.max(
-        -SPEECH_HEAD.pitchBurstClampDeg,
-        Math.min(SPEECH_HEAD.pitchBurstClampDeg, burst * SPEECH_HEAD.pitchBurstScale),
+      // One low-frequency pitch bob whose amplitude tracks the energy
+      // envelope: quiet speech → small bob, loud speech → bigger bob, and it
+      // swells/settles with the voice because the envelope already carries
+      // the attack/release. Negative sin dips the head on the downbeat.
+      const rhythmAmp = Math.min(
+        SPEECH_HEAD.rhythmAmpClampDeg,
+        this._energyEnv * SPEECH_HEAD.rhythmRmsToAmpScale,
       );
-      this._pitchBurstEma = SPEECH_HEAD.pitchReleaseAlpha * rawPitchBurstDeg
-                          + (1 - SPEECH_HEAD.pitchReleaseAlpha) * this._pitchBurstEma;
-      baselinePitchDeg += this._pitchBurstEma;
-      // Breathing baseline (always present, non-RMS).
+      baselinePitchDeg += -rhythmAmp * Math.sin(2 * Math.PI * SPEECH_HEAD.rhythmHz * t);
+      // Breathing (barely visible at the head).
       baselinePitchDeg += Math.sin(2 * Math.PI * SPEECH_HEAD.breatheHz * t)
                        * SPEECH_HEAD.breathePeakDeg;
-      // Slow yaw drift — head turns gently across long utterances.
+      // Slow yaw/roll drift, gated softly by the same envelope so it belongs
+      // to the speech and settles in silences (0..1 with a smooth knee).
+      const gate = Math.min(1, this._energyEnv / SPEECH_HEAD.gateRef);
       baselineYawDeg = (
         Math.sin(2 * Math.PI * SPEECH_HEAD.yawSlowHz1 * t)
         + 0.5 * Math.sin(2 * Math.PI * SPEECH_HEAD.yawSlowHz2 * t)
-      ) / 1.5 * SPEECH_HEAD.yawSlowPeakDeg;
-      // Slow roll drift during speech — head tilts during long phrases.
+      ) / 1.5 * SPEECH_HEAD.yawSlowPeakDeg * gate;
       baselineRollDeg = (
         Math.sin(2 * Math.PI * SPEECH_HEAD.rollHz1 * t)
         + 0.6 * Math.sin(2 * Math.PI * SPEECH_HEAD.rollHz2 * t)
-      ) / 1.6 * SPEECH_HEAD.rollPeakDeg;
+      ) / 1.6 * SPEECH_HEAD.rollPeakDeg * gate;
     }
 
     // 1€ filter ONLY on the slow baseline (filters out frame-to-frame jitter
@@ -700,26 +742,32 @@ export class GaussianAvatar implements Disposable {
       }
     }
 
-    // Compose Euler 'YXZ' per bone via cervical share distribution. With the
-    // renderer composing procedural as a DELTA on top of clip rotation
-    // (postmultiply), amplitude=0 means identity-delta = clip wins, so we don't
-    // need to pass through bind pose mid-transition. Roll uses a slightly
-    // different distribution (45/35/20) because lower-cervical contributes
-    // more to lateral flexion than to flex/yaw (§2 biomech). Renderer
-    // interprets [pitch, yaw, roll] = [x, y, z] in 'YXZ' Euler order and
-    // POSTMULTIPLIES onto bone.quaternion.
-    const totalPitchRad = (smoothPitchDeg + nodPitchDeg) * amplitude * DEG_TO_RAD;
-    const totalYawRad   = smoothYawDeg * amplitude * DEG_TO_RAD;
-    const totalRollRad  = smoothRollDeg * amplitude * DEG_TO_RAD;
+    // Transition blend: ease from the captured pose to the live target. The
+    // renderer composes our output as a DELTA on the clip rotation
+    // (postmultiply, identity = clip wins). Roll uses a slightly different
+    // cervical distribution (45/35/20) because lower-cervical contributes
+    // more to lateral flexion (§2 biomech). Renderer reads [pitch, yaw, roll]
+    // = [x, y, z] in 'YXZ' Euler order.
+    const targetPitchDeg = smoothPitchDeg + nodPitchDeg;
+    const outPitchDeg = this._blendFromDeg.pitch + (targetPitchDeg - this._blendFromDeg.pitch) * blendK;
+    const outYawDeg   = this._blendFromDeg.yaw   + (smoothYawDeg  - this._blendFromDeg.yaw)   * blendK;
+    const outRollDeg  = this._blendFromDeg.roll  + (smoothRollDeg - this._blendFromDeg.roll)  * blendK;
+    this._lastOutDeg.pitch = outPitchDeg;
+    this._lastOutDeg.yaw   = outYawDeg;
+    this._lastOutDeg.roll  = outRollDeg;
 
-    // DEBUG 2026-06-11 evening: log every ~1 s so we can confirm roll is non-zero.
+    const totalPitchRad = outPitchDeg * DEG_TO_RAD;
+    const totalYawRad   = outYawDeg * DEG_TO_RAD;
+    const totalRollRad  = outRollDeg * DEG_TO_RAD;
+
+    // DEBUG: log every ~1 s (state / blend progress / output degrees).
     if (!(this as any)._lastNeckDebugMs || nowMs - (this as any)._lastNeckDebugMs > 1000) {
       (this as any)._lastNeckDebugMs = nowMs;
-      const p = (totalPitchRad / DEG_TO_RAD).toFixed(2);
-      const y = (totalYawRad / DEG_TO_RAD).toFixed(2);
-      const r = (totalRollRad / DEG_TO_RAD).toFixed(2);
+      const p = outPitchDeg.toFixed(2);
+      const y = outYawDeg.toFixed(2);
+      const r = outRollDeg.toFixed(2);
       // eslint-disable-next-line no-console
-      console.log(`[NeckPose] state=${this.curState}  amp=${amplitude.toFixed(2)}  pitch=${p}°  yaw=${y}°  roll=${r}°`);
+      console.log(`[NeckPose] state=${this.curState}  blend=${blendK.toFixed(2)}  energy=${this._energyEnv.toFixed(3)}  pitch=${p}°  yaw=${y}°  roll=${r}°`);
     }
 
     this._neckPoseResult.head[0]      = totalPitchRad * NECK_DIST.head;
@@ -746,6 +794,14 @@ export class GaussianAvatar implements Disposable {
       this._nodPendingFireAtMs = 0;
       return;
     }
+    // The silence cue is only meaningful while an audio feed is actually
+    // driving the energy signal. Between turns there is no feed, so the
+    // accumulated-silence counter is stale — don't schedule phantom nods.
+    // (A real user-speech feed will replace this cue.)
+    if (nowMs - this._lastRmsUpdateMs > 200) {
+      this.msInLowEnergy = 0;
+      return;
+    }
     // Schedule a new nod if silence cue tripped AND no nod active/pending.
     if (this._nodStartMs === 0 && this._nodPendingFireAtMs === 0
         && this.msInLowEnergy >= NOD.triggerSilenceMs) {
@@ -756,57 +812,90 @@ export class GaussianAvatar implements Disposable {
   }
 
   /**
-   * Feed RMS energy of an incoming audio frame so the procedural gaze controller
-   * can detect speech pauses and cluster away-glances there. Called once per
-   * SyncFrame from ChatManager. RMS is linear in [0, 1].
+   * Feed the RMS energy of an audio frame. Only captures the latest raw
+   * sample; the smoothed envelope and pause state are advanced at render rate
+   * (see getNeckPose / _updatePauseState), so motion is decoupled from
+   * audio-callback timing. RMS is linear in [0, 1].
    */
   public updateAudioRMS(rms: number): void {
-    const now = performance.now();
-    // EMA smoothing — strong because frames arrive at ~30 Hz
-    this.smoothedAudioRMS = PAUSE_RMS_EMA_ALPHA * rms
-      + (1 - PAUSE_RMS_EMA_ALPHA) * this.smoothedAudioRMS;
+    this._rawRms = rms;
+    this._lastRmsUpdateMs = performance.now();
+  }
 
-    // Per-frame dt is ~33 ms but be robust to gaps in the stream
-    const dt = this.lastAudioRMSUpdateMs === 0
-      ? 33
-      : Math.min(200, now - this.lastAudioRMSUpdateMs);
-    this.lastAudioRMSUpdateMs = now;
+  /**
+   * Hysteretic speech-pause detector, advanced once per rendered frame off the
+   * energy envelope. Feeds the Responding-state gaze aversion clustering.
+   */
+  private _updatePauseState(nowMs: number): void {
+    const dt = this._lastPauseUpdateMs === 0
+      ? 16 : Math.min(100, nowMs - this._lastPauseUpdateMs);
+    this._lastPauseUpdateMs = nowMs;
 
-    if (this.smoothedAudioRMS < PAUSE_RMS_THRESHOLD) {
+    if (this._energyEnv < PAUSE_RMS_THRESHOLD) {
       this.msInLowEnergy += dt;
       this.msInHighEnergy = 0;
       if (!this.inSpeechPause && this.msInLowEnergy >= PAUSE_ENTER_MS) {
         this.inSpeechPause = true;
-        log.info(`[gaze] entered speech pause after ${this.msInLowEnergy.toFixed(0)}ms low energy`);
       }
     } else {
       this.msInHighEnergy += dt;
       this.msInLowEnergy = 0;
       if (this.inSpeechPause && this.msInHighEnergy >= PAUSE_EXIT_MS) {
         this.inSpeechPause = false;
-        log.info(`[gaze] exited speech pause after ${this.msInHighEnergy.toFixed(0)}ms high energy`);
       }
     }
   }
   
+  // Face-output continuity gate. The emitted frame may never jump: live
+  // frames pass through untouched (lipsync must track the audio exactly),
+  // but when live data is absent — turn end, interruption, teardown of any
+  // kind — the output eases from the LAST EMITTED frame to neutral with
+  // per-region release rates (mouth fastest: residual jaw-open after silence
+  // reads as an error; brows slowest, matching natural expression offset).
+  // Continuity is enforced here at the output layer so no upstream code
+  // path is able to snap the face.
+  private _faceOut: Record<string, number> | null = null;
+  private _faceReleaseAlpha: Record<string, number> = {};
+
+  private static _releaseAlphaFor(key: string): number {
+    // Per-frame EMA rates at ~60 Hz: mouth ≈95% released in ~180 ms,
+    // brows ~350 ms, everything else ~280 ms.
+    if (key.startsWith('mouth') || key.startsWith('jaw') || key.startsWith('tongue')) return 0.24;
+    if (key.startsWith('brow')) return 0.13;
+    return 0.16;
+  }
+
   /**
    * Get current blendshapes for rendering
    * Frontend handles ALL blinking - server blink values are overridden
    */
   public getArkitFaceFrame() {
+    this._t3note('face');
     // Return neutral pose when paused
     if (this.isPaused) {
       return this.neutralBlendshapes;
     }
-    
-    let result: Record<string, number>;
-    
-    // Use live blendshapes if available (always - following OpenAvatarChat)
+
+    // Canonical output object + per-channel release rates, built once.
+    if (!this._faceOut) {
+      this._faceOut = { ...this.neutralBlendshapes };
+      for (const k of Object.keys(this.neutralBlendshapes)) {
+        this._faceReleaseAlpha[k] = GaussianAvatar._releaseAlphaFor(k);
+      }
+    }
+    const result = this._faceOut;
+
     if (this.liveBlendshapeData) {
-      result = { ...this.liveBlendshapeData };
+      // Live stream present: pass through (and remember what we emitted).
+      const live = this.liveBlendshapeData;
+      for (const k in result) result[k] = live[k] ?? 0;
     } else {
-      // No live data: use neutral pose
-      result = { ...this.neutralBlendshapes };
+      // No live data: glide from the last emitted frame toward neutral.
+      for (const k in result) {
+        const tgt = this.neutralBlendshapes[k] ?? 0;
+        const next = result[k] + (tgt - result[k]) * this._faceReleaseAlpha[k];
+        result[k] = Math.abs(next - tgt) < 0.001 ? tgt : next;
+      }
     }
     
     // Force eyes closed if requested (overrides everything)
@@ -971,28 +1060,38 @@ export class GaussianAvatar implements Disposable {
     const curPitch = this.gazeStartPitchDeg
       + (this.gazeTargetPitchDeg - this.gazeStartPitchDeg) * eased;
 
+    // Publish the current gaze intent as an offset from the camera axis. A
+    // renderer with camera look-at support reads it via getGazeOffset() and
+    // owns the eyeLook channels; the channel writes below only take effect on
+    // renderers without look-at support.
+    this._gazeOffset.yawDeg = curYaw;
+    this._gazeOffset.pitchDeg = curPitch;
+
     // Zero all 8 eyeLook channels first (so server values don't bleed through)
     for (const ch of EYE_LOOK_CHANNELS) blendshapes[ch] = 0;
 
     // Yaw convention: positive = looking RIGHT (viewer's right).
     // Pitch convention: positive = looking UP.
-    const yawUnits = Math.min(Math.abs(curYaw) / SACCADE_ARKIT_DEG_PER_UNIT, 1);
-    const pitchUnits = Math.min(Math.abs(curPitch) / SACCADE_ARKIT_DEG_PER_UNIT, 1);
-
+    // Per-direction calibration so both eyes rotate the same physical angle —
+    // the abducting eye uses the (stronger) Out morph scale, the adducting
+    // eye the (weaker) In morph scale.
     if (curYaw > 0) {
-      blendshapes["eyeLookOutLeft"] = yawUnits;
-      blendshapes["eyeLookInRight"] = yawUnits;
+      // viewer-right = subject-left: left eye abducts (Out), right adducts (In)
+      blendshapes["eyeLookOutLeft"] = Math.min(curYaw / EYE_DEG_PER_UNIT.out, 1);
+      blendshapes["eyeLookInRight"] = Math.min(curYaw / EYE_DEG_PER_UNIT.in, 1);
     } else if (curYaw < 0) {
-      blendshapes["eyeLookInLeft"] = yawUnits;
-      blendshapes["eyeLookOutRight"] = yawUnits;
+      blendshapes["eyeLookInLeft"]  = Math.min(-curYaw / EYE_DEG_PER_UNIT.in, 1);
+      blendshapes["eyeLookOutRight"] = Math.min(-curYaw / EYE_DEG_PER_UNIT.out, 1);
     }
 
     if (curPitch > 0) {
-      blendshapes["eyeLookUpLeft"] = pitchUnits;
-      blendshapes["eyeLookUpRight"] = pitchUnits;
+      const u = Math.min(curPitch / EYE_DEG_PER_UNIT.up, 1);
+      blendshapes["eyeLookUpLeft"] = u;
+      blendshapes["eyeLookUpRight"] = u;
     } else if (curPitch < 0) {
-      blendshapes["eyeLookDownLeft"] = pitchUnits;
-      blendshapes["eyeLookDownRight"] = pitchUnits;
+      const u = Math.min(-curPitch / EYE_DEG_PER_UNIT.down, 1);
+      blendshapes["eyeLookDownLeft"] = u;
+      blendshapes["eyeLookDownRight"] = u;
     }
   }
 

@@ -17,8 +17,10 @@ export interface IAvatarController {
   /**
    * Set the current chat state for avatar behavior
    * @param state - Current state: Idle, Listening, Thinking, Responding
+   * @param source - Identifies the calling code path, for state-write
+   *   tracing and arbitration
    */
-  setChatState(state: ChatState): void;
+  setChatState(state: ChatState, source?: string): void;
 
   /**
    * Get the current chat state

@@ -30,6 +30,7 @@ interface ScheduledFrame {
   startTime: number;  // AudioContext time when this frame starts
   endTime: number;    // AudioContext time when this frame ends
   frameIndex: number;
+  rms: number;        // Precomputed audio RMS of this frame
 }
 
 /**
@@ -349,9 +350,11 @@ export class SyncPlayback implements Disposable {
       floatData[i] = s;
       sumSq += s * s;
     }
-    if (this.onAudioRMS && sampleCount > 0) {
-      this.onAudioRMS(Math.sqrt(sumSq / sampleCount));
-    }
+    // RMS is stored on the scheduled frame and emitted at PLAYBACK time (see
+    // updateBlendshapeForCurrentTime), not here. Emitting at schedule time
+    // would drive procedural motion ~150 ms ahead of the audio the user
+    // hears, and in bursts tied to frame delivery rather than to playback.
+    const frameRms = sampleCount > 0 ? Math.sqrt(sumSq / sampleCount) : 0;
     
     // Create audio buffer - this allocation is unavoidable (Web Audio API requirement)
     const audioBuffer = this.audioContext.createBuffer(1, sampleCount, this.sampleRate);
@@ -375,6 +378,7 @@ export class SyncPlayback implements Disposable {
       startTime: startTime,
       endTime: startTime + duration,
       frameIndex: frame.frameIndex,
+      rms: frameRms,
     };
 
     // No limit on scheduled frames - they're cleaned up by cleanupScheduledFrames()
@@ -434,16 +438,21 @@ export class SyncPlayback implements Disposable {
       }
     }
 
-    // Apply blendshape weights - simple and correct
+    // Apply blendshape weights - simple and correct. RMS rides the same
+    // playback clock so procedural head motion is synced to the audio the
+    // user actually hears; between frames (a genuine gap in the playing
+    // audio) the emitted RMS is 0.
     if (activeFrame) {
       this.currentWeights = activeFrame.weights;
       this.onBlendshapeUpdate(activeFrame.weights);
+      this.onAudioRMS?.(activeFrame.rms);
     } else if (this.isPlaying && this.scheduledFrames.length > 0) {
       // If we're between frames or slightly ahead, use the most recent frame
       const lastFrame = this.scheduledFrames[this.scheduledFrames.length - 1];
       if (currentTime < lastFrame.endTime + 0.1) {
         this.onBlendshapeUpdate(lastFrame.weights);
       }
+      this.onAudioRMS?.(0);
     }
   }
 

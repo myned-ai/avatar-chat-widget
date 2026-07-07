@@ -210,7 +210,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
       
       // Apply any pending state
       if (this._pendingState !== 'Idle') {
-        this._avatar.setChatState(this._pendingState);
+        this._avatar.setChatState(this._pendingState, 'lazy-pending-apply');
       }
       
       if (this._liveBlendshapesEnabled) {
@@ -263,11 +263,15 @@ export class LazyAvatar implements IAvatarController, Disposable {
     }
   }
   
-  public setChatState(state: ChatState): void {
+  public setChatState(state: ChatState, source?: string): void {
     this._pendingState = state;
     if (this._avatar) {
-      this._avatar.setChatState(state);
+      this._avatar.setChatState(state, source);
     }
+  }
+
+  public updateAudioRMS(rms: number): void {
+    this._avatar?.updateAudioRMS?.(rms);
   }
 
   public getChatState(): ChatState {
