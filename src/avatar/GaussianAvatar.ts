@@ -271,9 +271,6 @@ export class GaussianAvatar implements Disposable {
       this._applySceneBackground(this._backgroundImage);
     }
 
-    // DEBUG: expose renderer for devtools probing (bone-color visualization, etc.)
-    (window as unknown as { __nyxRenderer: unknown }).__nyxRenderer = this._renderer;
-
     this.startTime = performance.now() / 1000;
     // Initial state is 'Idle' - ChatManager will set appropriate states based on conversation
     // State flow: Idle → Hello (user interaction) → Responding (AI speaks) → Idle

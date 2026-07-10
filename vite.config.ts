@@ -1,32 +1,10 @@
 // vite.config.ts
 import { defineConfig } from 'vite'
 import basicSsl from '@vitejs/plugin-basic-ssl'
-import path from 'path'
-
-// DEBUG 2026-06-11: alias the gsplat-flame-avatar-renderer import directly to the
-// local development repo's built ESM bundle. This bypasses node_modules entirely
-// so we don't have to keep cp'ing the dist files in and fighting Vite's immutable
-// caching of node_modules-served files. Remove (or switch to a `file:../`
-// dependency in package.json) once the local renderer is published to npm.
-const LOCAL_RENDERER = path.resolve(
-  'C:/Users/AntoniosMakrodimitra/Documents/gsplat-flame-avatar-renderer/dist/gsplat-flame-avatar-renderer.esm.js'
-)
 
 export default defineConfig({
   base: "./",
   plugins: [basicSsl()],
-  resolve: {
-    alias: {
-      '@myned-ai/gsplat-flame-avatar-renderer': LOCAL_RENDERER,
-    },
-    // dedupe is required because the aliased renderer lives outside this
-    // widget's node_modules, so without this Vite resolves `three` from the
-    // renderer's own node_modules → two separate three.js instances loaded
-    // simultaneously → Object3D prototypes don't match → `updateMatrixWorld`
-    // appears undefined on objects from the "wrong" three. Forcing both to
-    // resolve through the widget's node_modules keeps one instance.
-    dedupe: ['three', 'jszip'],
-  },
   server: {
     host: '0.0.0.0',
     https: true,
