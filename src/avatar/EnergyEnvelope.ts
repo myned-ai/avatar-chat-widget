@@ -35,6 +35,9 @@ export const DEFAULT_ENERGY_PARAMS: EnergyEnvelopeParams = {
   releaseSec: 0.35,
 };
 
+/** Seconds since the last raw RMS sample beyond which the feed is treated as silent. */
+export const ENERGY_FEED_STALE_SEC = 0.15;
+
 export class EnergyEnvelope {
   private level = 0;
   constructor(private readonly params: EnergyEnvelopeParams = DEFAULT_ENERGY_PARAMS) {}

@@ -300,7 +300,7 @@ const AVATAR_STYLES = `
 }
 
 [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
-  display: block;
+  /* display: block; */ /* SILENCED: mist fade disabled, base rule (display:none) wins */
 }
 
 /* Text-Focus Mode Transformations (Mascot Orb) */
@@ -935,7 +935,7 @@ const MOBILE_STYLES = `
   
   /* Suggestions & Mist */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
-    display: block;
+    /* display: block; */ /* SILENCED: mist fade disabled on mobile too */
     bottom: 0;
     height: 35vh;
   }

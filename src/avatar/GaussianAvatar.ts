@@ -2,7 +2,7 @@ import * as GaussianSplats3D from "@myned-ai/gsplat-flame-avatar-renderer"
 import { TextureLoader, SRGBColorSpace, Object3D, type Scene } from 'three';
 import { createNeutralWeights } from '../constants/arkit';
 import { logger } from '../utils/Logger';
-import { HeadMotionController, type NeckPose } from './head-motion';
+import { EnergyEnvelope, ENERGY_FEED_STALE_SEC } from './EnergyEnvelope';
 import type { Disposable, ChatState } from '../types/common';
 
 const log = logger.scope('GaussianAvatar');
@@ -206,9 +206,12 @@ export class GaussianAvatar implements Disposable {
   private msInHighEnergy = 0;                   // contiguous ms above threshold
   private inSpeechPause = false;                // hysteretic pause state
 
-  // Procedural head/neck motion (ambient noise + speech-energy + spring).
-  private readonly _headMotion = new HeadMotionController();
-  private _lastNeckMs = 0;
+  // Speech-energy envelope feeding the pause detector above. Head/neck motion
+  // itself is fully owned by the authored clips in the renderer — the widget
+  // sends no procedural head pose.
+  private readonly _speechEnergy = new EnergyEnvelope();
+  private _lastRawRms = 0;
+  private _lastRmsMs = 0;
   private _lastPauseUpdateMs = 0;
 
   // Behavioral gaze offset from the camera axis (degrees); see getGazeOffset.
@@ -257,7 +260,6 @@ export class GaussianAvatar implements Disposable {
       {
         getChatState: this.getChatState.bind(this),
         getExpressionData: this.getArkitFaceFrame.bind(this),
-        getNeckPose: this.getNeckPose.bind(this),
         // Supported by the current renderer build; not yet in the published
         // package's type declarations, hence the cast below.
         getGazeOffset: this.getGazeOffset.bind(this),
@@ -403,37 +405,29 @@ export class GaussianAvatar implements Disposable {
   }
 
   /**
-   * Procedural head/neck pose delta, consumed by the renderer each frame.
-   * All motion logic lives in the HeadMotionController (see ./head-motion);
-   * here we only advance it with the elapsed time and current state and feed
-   * the gaze-aversion pause detector from its energy signal.
-   */
-  public getNeckPose(): NeckPose {
-    const nowMs = performance.now();
-    const dtSec = this._lastNeckMs === 0 ? 1 / 60 : (nowMs - this._lastNeckMs) / 1000;
-    this._lastNeckMs = nowMs;
-    const pose = this._headMotion.update(this.curState, dtSec);
-    this._updatePauseState(nowMs, this._headMotion.energyLevel);
-    return pose;
-  }
-
-  /**
-   * Feed the RMS energy of an audio frame to the head-motion controller. The
-   * controller smooths it at render rate, so motion is decoupled from
-   * audio-callback timing. RMS is linear in [0, 1].
+   * Feed the RMS energy of an audio frame. Only the raw sample is captured
+   * here; the envelope is advanced at render rate by the pause detector, so
+   * the signal is decoupled from audio-callback timing. RMS is linear [0, 1].
    */
   public updateAudioRMS(rms: number): void {
-    this._headMotion.setAudioRms(rms);
+    this._lastRawRms = Math.max(0, rms);
+    this._lastRmsMs = performance.now();
   }
 
   /**
    * Hysteretic speech-pause detector for gaze-aversion clustering, advanced
-   * once per rendered frame off the head-motion energy envelope (0..1).
+   * once per rendered frame. Drives the speech-energy envelope from the last
+   * raw RMS sample (a stale feed reads as silence, so the envelope releases
+   * smoothly when playback stops).
    */
-  private _updatePauseState(nowMs: number, energy: number): void {
+  private _updatePauseState(nowMs: number): void {
     const dt = this._lastPauseUpdateMs === 0
       ? 16 : Math.min(100, nowMs - this._lastPauseUpdateMs);
     this._lastPauseUpdateMs = nowMs;
+
+    const rmsIsFresh = this._lastRmsMs !== 0
+      && (nowMs - this._lastRmsMs) / 1000 < ENERGY_FEED_STALE_SEC;
+    const energy = this._speechEnergy.update(rmsIsFresh ? this._lastRawRms : 0, dt / 1000);
 
     if (energy < PAUSE_ENERGY_THRESHOLD) {
       this.msInLowEnergy += dt;
@@ -576,6 +570,7 @@ export class GaussianAvatar implements Disposable {
    */
   private applyGaze(blendshapes: Record<string, number>): void {
     const now = performance.now();
+    this._updatePauseState(now);
     // Pick the saccade config for the current ChatState (Idle = active eyes,
     // Responding = focused eyes). Falls back to Idle for any unknown state.
     const cfg = SACCADE_BY_STATE[this.curState] || SACCADE_BY_STATE['Idle'];
