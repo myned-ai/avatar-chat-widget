@@ -47,6 +47,8 @@
         "build:lib": "tsc && vite build --config vite.config.lib.ts",
         "build:all": "npm run build && npm run build:lib",
         "preview": "vite preview",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "test:server": "python tools/test_server.py",
         "lint": "eslint src --ext .ts,.tsx",
         "lint:fix": "eslint src --ext .ts,.tsx --fix",
@@ -63,7 +65,8 @@
         "tslib": "^2.8.1",
         "typescript": "^5.8.3",
         "vite": "^5.1.6",
-        "vite-plugin-dts": "^4.5.4"
+        "vite-plugin-dts": "^4.5.4",
+        "vitest": "^2.1.9"
     },
     "dependencies": {
         "@myned-ai/gsplat-flame-avatar-renderer": "^1.2.0",

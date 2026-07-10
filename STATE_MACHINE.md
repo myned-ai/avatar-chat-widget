@@ -263,6 +263,156 @@ a debug skip-list (`openai/sample_agent.py:244-245`).
 
 ---
 
+## 0.6 Speech-driven head motion — redesign spec (2026-07-08 research synthesis)
+
+*Three parallel research agents (human kinematics, audio→motion DSP, avatar/
+VTuber/game systems) reached the SAME conclusion independently. This section
+is the build spec that replaces the continuous-carrier speech head driver.
+Sources are in Part X below.*
+
+### The root cause (why it "nods all the time")
+A continuous loudness-scaled sine (our 0.9 Hz pitch bob) is the procedural
+equivalent of **regression-to-mean**: a metronomic carrier that never stops.
+Every camp rejects it. ML SOTA *samples* head pose (one-to-many; DiffPoseTalk
+pose-diversity 1.16 vs 0 for deterministic). Shipping systems don't drive
+head from audio at all: **NVIDIA Audio2Face-3D outputs no head pose**; **Unreal
+MetaHuman's real-time solver disables audio-driven head motion**; VTuber apps
+map **volume→mouth only**. And the biology says conversational head↔energy
+coupling is **weak (r≈0.19–0.30)**, not the r≈0.8 of read speech — so a
+loudness carrier reproduces the wrong (read-speech) model.
+
+### Target statistics (human, conversational)
+- **Duty cycle:** head in *some* motion ~90% of speaking time, but that is
+  near-continuous micro-motion + **discrete gestures separated by holds**, not
+  one oscillation. Stillness dominates listening/pauses (~13% moving). Energy
+  ordering **Speaking ≫ Listening > Idle**.
+- **Rate:** salient gestures ≈ **once per phrase, every 0.5–2 s**; each rises
+  and settles over **200–500 ms**. Dominant band **1–2 Hz** (phrase rate); all
+  head energy **< ~5 Hz**.
+- **Axis priority (conversation):** **pitch is small** — 85–87% of frames
+  within ±15°; **yaw is the widest axis** (turning); roll third. ⇒ **demote
+  pitch from primary carrier**; let slow yaw + subtle roll carry ambient
+  variety, reserve pitch for sparse emphasis beats.
+- **Event-locking:** big movements cluster at **phrase-final boundaries and
+  stressed syllables**; nod apex lands **near the end of the phrase-final
+  syllable**.
+- **Amplitude:** more is worse — doubling head amplitude *reduced* perceived
+  quality (Munhall 2004). Clamp well inside ROM; keep typical gestures small.
+- **What a fixed sine lacks:** event-locking, amplitude/timing **variability**,
+  **holds/stillness**, and **asymmetry** (onset ≠ return). These four are the
+  anti-bobblehead ingredients.
+
+### Target architecture — three layers
+1. **Ambient idle (all states, always on):** slow **coherent/Perlin noise**
+   per axis (non-repeating → no loop seam), sub-0.3 Hz, a few degrees, spring-
+   smoothed. Yaw-dominant, subtle roll, tiny pitch. Plus a near-invisible
+   breath (~0.25 Hz, <1°). This is the "aliveness" floor.
+2. **Speech beats (Responding):** discrete emphasis gestures fired by an
+   **onset detector**, not a carrier. Each beat = one small damped, asymmetric
+   pitch(+slight yaw/roll) impulse, 200–500 ms, apex event-locked, amplitude
+   scaled by the accent strength. Refractory **250–400 ms** (≈ ≤3–4/s ceiling;
+   NOT librosa's 30 ms music default).
+3. **State gating:** Speaking ≫ Listening > Idle. Volume-gate the beat layer;
+   near-still holds when quiet; Listening = occasional single backchannel nod
+   over the idle floor; active head motion while listening reads as unnatural.
+
+### Signal chain (numbers)
+`30 Hz RMS (playback-timed, pushed to a small timestamped jitter buffer)`
+→ **perceptual map** (dB = 20·log10, or power-law E^0.5–0.6)
+→ **envelope follower** (attack ~55 ms / release ~350 ms — already in-range)
+→ **noise gate** (open/close **3–6 dB** hysteresis, **hold 150–250 ms**)
+→ **onset detector** (half-wave-rectified first difference of the dB envelope;
+   adaptive threshold = moving median over ±100 ms + δ; **refractory 250–400 ms**)
+→ **beat trigger** (scales impulse magnitude by accent size)
+→ **critically-damped spring** to the target pose (**halflife 0.12–0.18 s** →
+   damping ≈ 2.773/halflife; frame-rate-independent, cannot overshoot).
+
+**Advance every stage on the 60 Hz RENDER clock reading the buffered value —
+never on packet arrival.** Advancing the follower on jittery 30 Hz packet
+arrival is the textbook cause of the "occasional jerk"; the spring bridge +
+render-clock read is the fix. (30 Hz is otherwise fine — 6–10× oversampled for
+a <3 Hz head band; stepping is a reconstruction artifact, not undersampling.)
+
+### The two glitch suspects (open — diagnose passively, no real-time catch)
+1. **Reconstruction stepping / packet-timed advance** — addressed by the spring
+   bridge + render-clock read above.
+2. **Idle clip loop seam** — single-clip mode plays `yumi_h5_a3_idle` on
+   LoopRepeat; if its head track's first≠last keyframe the head snaps every
+   loop. Confirm by logging head-bone quaternion per frame and looking for a
+   periodic discontinuity at clip-wrap, OR hard-freeze the clip at load for a
+   whole session. If confirmed: neutralize the clip's head track and let the
+   procedural layer own the head, or re-author the loop.
+
+### Borrowable constants from shipping systems
+Live2D: head **±30°**, body follows at **±10°** (1/3 amplitude) — cheap realism
+and stops the head looking detached. Volume→mouth only. Audio2Face-3D:
+**volume-gated damping** (damp head harder when quiet). Overgrowth: spring-to-
+target + additive offset layers, never raw signal. Backchannel nod ceiling
+≈ **1 nod / 17 s** (listening).
+
+---
+
+## 0.7 FINAL ARCHITECTURE — the industry answer (2026-07-11 three-agent synthesis)
+
+*Round-2 research at Antonios' insistence ("it must be common knowledge in
+animation!") — three agents: game dialogue pipelines, avatar-tool parameters,
+classic animation craft. All three converge. Sources in Part XI. This
+supersedes §0.6 where they differ.*
+
+### The unanimous industry pattern
+**Audio drives the mouth. The head comes from AUTHORED ANIMATION plus a thin
+procedural layer.** No shipped AAA title maps runtime audio energy to head
+rotation (verified down to Valve's source code). All audio-driven head systems
+(FaceFX/Mass Effect, JALI/Cyberpunk, MetaHuman) are OFFLINE analyses firing
+discrete nod events on STRESSED SYLLABLES (≥0.5 s spacing), baked to curves.
+Epic's real-time solver explicitly refuses to generate head motion. iClone
+dropped audio→head; Adobe's is offline-only. The one shipping direct
+audio→head product ever (CrazyTalk) used threshold + smooth + spring — never
+raw.
+
+### The standard layer stack (what we build)
+1. **Base body clip** — idle loop when not speaking; one of the asset's 3
+   AUTHORED SPEAK CLIPS per Responding utterance: picked randomly (no
+   immediate repeat), played UNSYNCHRONIZED with the audio, crossfaded in/out
+   (0.25–0.5 s). This is Witcher 3 (2,400 additive gestures over idles),
+   Bethesda (per-line Speaker Idle), Valve (Gesture events), BioWare.
+2. **Procedural micro-layer (small!)** — keep-alive "moving hold" drift
+   between/over clips: sub-degree noise, "mostly still but alive" (craft law).
+   Optional later: discrete FaceFX-style emphasis nods (stress-onset trigger,
+   ≥0.5 s refractory, small amplitude, timed ~3–4 frames / ≈130–165 ms BEFORE
+   the stressed sound — head leads, mouth on the beat, never late).
+3. **Procedural gaze look-at, applied LAST with clamps** — Valve practice
+   (ramps 0.2–0.4 s, per-axis velocity clamps). ✅ already built (camera
+   look-at) and accepted.
+4. **Face/viseme layer** — model-driven; ✅ face continuity gate built.
+
+### Craft laws (Williams / Disney / Blair — design law for any accent layer)
+- Accent STRESSED WORDS, not syllables; ~one dominant accent per sentence;
+  gloss over the rest. Hitting every word at even spacing IS the bobblehead.
+- Head accent leads the sound by 3–4 frames (~125–165 ms); mouth on the beat;
+  NEVER late. Pop into the accent, cushion out (never ease in).
+- An accent needs ≥6 frames (~250 ms) to read. Between accents: moving holds
+  8–16 frames (0.3–0.7 s) drifting BEYOND the pose, in the last momentum's
+  direction — never frozen, never wandering.
+- Intensity ↑ ⇒ head STEADIER (let brows/eyes carry it). A 5° tilt already
+  reads. Asymmetry over symmetry. Blink on head turns.
+- Vary size/timing/spacing of beats — even rhythm reads as mechanical.
+
+### Verdicts this settles
+- **The 2026-06-11 "locked decision" (all states share the idle clip,
+  procedural owns conversational motion) is REVERSED** — it discarded the
+  asset's professional mocap speak clips and pushed a month of procedural
+  compensation. Root work = fix the renderer's clip transitions (the actual
+  bug it was working around).
+- **The widget HeadMotionController survives, demoted**: its design (noise
+  sway + speech-scaled amplitude + spring) is the validated SitePal/CrazyTalk
+  procedural recipe — right architecture, wrong job. New job: micro
+  keep-alive only (Responding speech-scaled amplitudes → ~0; clips carry it).
+- **Kept as-is**: state arbiter, camera look-at gaze, face gate, blinks —
+  they map 1:1 onto the industry stack.
+
+---
+
 # ORIGINAL RESEARCH (Parts I–VII, compiled 2026-06-10/11)
 *Parameter source-of-truth cited by the implementation comments ("§" refs).*
 
@@ -1039,6 +1189,69 @@ gameplay. Mapping to us: parameter tweaks within a state = merge (no ramp);
 state change = ONE blend; `setChatState` spam = overwrite policy — and the
 ~10 writers need a single arbitration point.
 http://www.gameaipro.com/GameAIPro2/GameAIPro2_Chapter12_Separation_of_Concerns_Architecture_for_AI_and_Animation.pdf
+
+---
+
+# PART X — Speech head-motion redesign sources (added 2026-07-08)
+*Backing the §0.6 build spec. Three-agent synthesis: kinematics, DSP, systems.*
+
+## X.1 Human kinematics of head motion during speech
+- Hadar et al. 1983 *Kinematics of head movements* — head moving in **89.9%** of speaking frames vs **12.8%** listening/pause. https://www.sciencedirect.com/science/article/abs/pii/0167945783900040
+- Ishi, Ishiguro, Hagita 2014 — nods sync to **end of phrase-final syllable** of strong-boundary phrases; F0↔head corr 0.39–0.52 (Eng). https://www.sciencedirect.com/science/article/abs/pii/S0167639313000745
+- Munhall et al. 2004 *Visual Prosody* — head R²>0.63 vs F0, ≈0.32 vs RMS (READ speech); **doubling amplitude REDUCED intelligibility**. https://journals.sagepub.com/doi/10.1111/j.0963-7214.2004.01502010.x
+- Haag & Shimodaira 2020 CCCAE — spontaneous conversation head↔(F0+energy) CCA **≈0.11–0.19** (vs ~0.8 read); active listening motion judged unnatural. https://arxiv.org/abs/2002.01869
+- Head-Pose-Aware VSR 2026 (LRS2/LRS3) — pitch within ±15° for **85–87%** of frames; **yaw is the widest axis** (26.5% exceed 30°). https://arxiv.org/pdf/2606.00751
+- MTF audiovisual speech, PLOS CB 2022 — head/face motion couples to speech envelope in **1–2 Hz** (phrase) band; mouth 3–4 Hz. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9295967/
+- McClave 2000; Graf/Cosatto 2002 *Visual Prosody* — beats cluster at prosodic events/boundaries. https://www.sciencedirect.com/science/article/abs/pii/S037821669900079X
+
+## X.2 DSP / signal → motion
+- theorangeduck *Spring-Roll-Call* — critically-damped spring, damping=2.773/halflife, frame-rate-independent, no overshoot. https://theorangeduck.com/page/spring-roll-call
+- Casiez 1€ filter — defaults min_cutoff 1.0 Hz, β 0; for sub-1-Hz posture use min_cutoff ≈0.1–0.5 Hz. https://gery.casiez.net/1euro/
+- librosa peak_pick / onset_detect — adaptive-median threshold + refractory (`wait`); 30 ms wait is music-transcription, use 250–400 ms for head. https://librosa.org/doc/main/generated/librosa.util.peak_pick.html
+- Dixon 2006 *Onset Detection Revisited* — spectral flux > energy on soft onsets; local-max window ~30 ms + adaptive threshold. https://www.ofai.at/papers/oefai-tr-2006-12.pdf
+- VU/PPM ballistics — VU 300 ms integration; PPM 5–10 ms attack / 1.7–2.8 s release (perceptual meter analogs). https://sound-au.com/project55.htm
+- Head-motion frequency ≤ ~2.6 Hz voluntary. https://pubmed.ncbi.nlm.nih.gov/3384048/
+- Noise-gate hysteresis 1–3 dB + hold across word gaps. https://www.soundonsound.com/techniques/advanced-gating-techniques-part-1
+
+## X.3 Avatar / talking-head / VTuber / game systems
+- DiffPoseTalk 2024 — SAMPLES pose via diffusion; pose-diversity **1.16 vs 0** deterministic; velocity+smoothness losses. https://arxiv.org/html/2310.00434v2
+- SadTalker CVPR 2023 (PoseVAE samples pose separately). https://openaccess.thecvf.com/content/CVPR2023/html/Zhang_SadTalker_Learning_Realistic_3D_Motion_Coefficients_for_Stylized_Audio-Driven_Single_CVPR_2023_paper.html
+- VividTalk 2023 — head-pose VQ codebook ("weak audio↔pose relationship… discontinuous results"). https://arxiv.org/abs/2312.01841
+- NVIDIA Audio2Face-3D — **no head pose** in shipping model; experimental head motion "struggles on silence"; volume-gated jitter suppression. https://arxiv.org/html/2508.16401v1
+- Unreal MetaHuman Audio-Driven Animation — real-time solver **disables** head-motion generation. https://dev.epicgames.com/documentation/metahuman/audio-driven-animation
+- Live2D standard params — head **±30°**, body **±10°**, breath 0–1. https://docs.live2d.com/en/cubism-editor-manual/standard-parameter-list/
+- Warudo idle head module (procedural, audio-decoupled). https://docs.warudo.app/docs/assets/character
+- BEAT (Cassell 2001) / SmartBody / Cerebella / GRETA — head nods as discrete prosody/keyword-triggered events, not carriers. https://www.justinecassell.com/publications/siggraph2001.final.PDF
+- Overgrowth / Rosen GDC 2014 — spring-to-target + additive procedural offset layers. https://www.gdcvault.com/play/1020583/Animation-Bootcamp-An-Indie-Approach
+
+---
+
+# PART XI — Industry & craft sources for §0.7 (added 2026-07-11)
+
+## XI.1 Game dialogue pipelines
+- Witcher 3 GDC 2016 (Tomsinski) *Behind the Scenes of Cinematic Dialogues* — generator places gestures on VO accent markers; ~2,400 additive dialogue anims, 35 idles/skeleton; pose-based look-ats. https://www.gdcvault.com/play/1022988/Behind-the-Scenes-of-Cinematic
+- Valve source-sdk-2013 `ai_baseactor.cpp` — head = clip + scene sliders + look-at summed on pose params, ClampWithBias; gaze ramps 0.2–0.4 s; per-think velocity clamps (pitch 10°, yaw 30°); blink 1.5–4.5 s. https://github.com/ValveSoftware/source-sdk-2013
+- FaceFX Analysis Actor — offline stress events → Head Pitch/Yaw/Roll + brow curves; rhythm events ≥0.5 s apart. https://facefx.github.io/documentation/doc/analysis-actor
+- JALI / Cyberpunk 2077 SIGGRAPH 2020 — offline paralingual neck/brow/eye motion from audio + text. https://dl.acm.org/doi/10.1145/3388767.3407339
+- Bethesda Creation Kit Topic Info — per-line Speaker/Listener Idle + Emotion 0–100. https://ck.uesp.net/wiki/Topic_Info
+- GameAIPro 2 ch.36 — base → masked → additive last; head/arm masks for conversational gestures. https://www.gameaipro.com/GameAIPro2/GameAIPro2_Chapter36_Realizing_NPCs_Animation_and_Behavior_Control_for_Believable_Characters.pdf
+- Uncharted 4 / TLOU2 — additive spine + head/arm partials over base; look-targets + layered saccades. https://www.gameanim.com/2018/03/09/interactive-cinematics-in-uncharted-4/
+- MetaHuman Audio-Driven Animation — head motion OFFLINE only; real-time solver produces none. https://dev.epicgames.com/documentation/metahuman/audio-driven-animation
+
+## XI.2 Avatar tools / products
+- SitePal API — `setIdleMovement(0–100, default 50)` / `setSpeechMovement(0–100, default 50)`: random sway, amplitude boosted while speaking. https://www.sitepal.com/docs/SitePal_API_Reference.pdf
+- CrazyTalk Auto Motion — the one shipped direct audio→head: Strength / Threshold / Smooth 0–100 / Spring 0–3, sample every 1–8 frames. https://www.reallusion.com/crazytalk/help/CrazyTalk7/UserManual/08_Animation/Auto_Motion/Auto_Motion_Settings.htm
+- Live2D physics — voice/mouth → ParamAngle via pendulums; weight ~60 %, Mobility 0.7–0.99 (0.95 typical), 60 FPS. https://docs.live2d.com/en/cubism-editor-manual/physics-operation/
+- iClone 8 — dropped auto audio→head (AccuLips + manual Face Puppet). https://manual.reallusion.com/iClone-8/Content/ENU/8.0/50-Animation/Pro_Facial_Animation/Face_Puppet.htm
+- Adobe Character Animator Speech-Aware Animation — OFFLINE audio→head take driving Face/Head Turner behaviors. https://community.adobe.com/t5/character-animator-beta-discussions/feature-focus-speech-aware-animation/td-p/11360982
+- Azure TTS Avatar / D-ID / HeyGen / Synthesia / Soul Machines / UneeQ — learned or driver-clip motion, no exposed curves.
+
+## XI.3 Animation craft (dialogue)
+- Richard Williams *The Animator's Survival Kit* — head accent 3–4 fr ahead; accent mostly UP with down-anticipation; hit only important vowels; ≥6 fr to read an accent; pop in, cushion out; blink on head turns. https://archive.org/details/4..Animators.Survival.Kit.Ebook_201810
+- Thomas & Johnston *The Illusion of Life* — anticipate dialogue 3–4 fr ahead, mouth on modulation; moving holds 8–16 fr drifting to a stronger pose; eyes lead 3–5 fr; no straight inbetweens. https://archive.org/details/TheIllusionOfLifeDisneyAnimation
+- Preston Blair — accent phrase starts + loud sounds; head tilts counter to gesturing arms; 5° tilt reads; suppress unimportant syllables. https://archive.org/details/HowToAnimateFilmCartoonsByPrestonBlair
+- Navone *Rhythm and Texture* — even-timed equal-size beats read mechanical; vary rhythm. http://blog.navone.org/2009/09/rhythm-and-texture.html
+- AnimSchool *Animating the Head* — "a little goes a long way"; intense lines = steady head. https://blog.animschool.edu/2025/03/14/animating-the-head/
 
 ---
 
