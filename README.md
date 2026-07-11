@@ -82,6 +82,7 @@ chat.destroy();  // Cleanup
 | `enableText` | `boolean` | `true` | Enable text chat |
 | `authEnabled` | `boolean` | `false` | Enable HMAC authentication |
 | `avatarUrl` | `string` | auto-detected | URL to avatar ZIP file |
+| `backgroundImage` | `string` | `undefined` | Image drawn behind the avatar in the 3D stage (URL or path relative to `assetsBaseUrl`) |
 | `assetsBaseUrl` | `string` | auto-detected | Base URL for worklet/assets |
 | `customStyles` | `string` | `undefined` | Custom CSS to inject into Shadow DOM |
 | `logLevel` | `string` | `'error'` | `none`, `error`, `warn`, `info`, `debug` |
@@ -111,6 +112,25 @@ AvatarChat.init({
   secondaryColor: '#37474F'
 });
 ```
+
+### Avatar Stage Background
+
+To show an image behind the avatar instead of the default flat background:
+
+```typescript
+AvatarChat.init({
+  container: '#avatar-chat',
+  serverUrl: 'wss://...',
+  backgroundImage: '/asset/office.png', // absolute URL, or path resolved against assetsBaseUrl
+});
+```
+
+### Mist Overlay
+
+The avatar-focus view has a soft mist fade at the bottom of the stage. It is
+currently disabled by default. To re-enable it, uncomment the two
+`display: block` rules for `.avatar-mist-overlay` in
+[src/widget/styles.ts](src/widget/styles.ts) (desktop and mobile) and rebuild.
 
 ### Advanced Styling
 
