@@ -28,6 +28,9 @@ import { LazyAvatar } from './avatar/LazyAvatar';
 import { ChatManager } from './managers/ChatManager';
 import { AudioContextManager } from './services/AudioContextManager';
 import { logger, LogLevel } from './utils/Logger';
+
+/** Injected by the library build (vite.config.lib.ts define); absent in dev. */
+declare const __VERSION__: string | undefined;
 import { WIDGET_STYLES } from './widget/styles';
 import { DrawerController, type DrawerState } from './widget/DrawerController';
 
@@ -983,8 +986,8 @@ if (typeof customElements !== 'undefined' && !customElements.get('avatar-chat-wi
  * AvatarChat - Public Widget API
  */
 export const AvatarChat = {
-  /** Version */
-  version: '__VERSION__',
+  /** Version — substituted by the library build; 'dev' when running from source */
+  version: typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev',
 
   /** Active instance */
   _instance: null as AvatarChatElement | null,
