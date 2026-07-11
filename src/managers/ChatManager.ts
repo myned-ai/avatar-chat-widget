@@ -739,7 +739,7 @@ export class ChatManager implements Disposable {
   }
 
   private stopAllPlayback(reason = 'unspecified'): void {
-    log.info(`[teardown] stopAllPlayback reason=${reason} turnId=${this.currentTurnId}`);
+    log.debug(`[teardown] stopAllPlayback reason=${reason} turnId=${this.currentTurnId}`);
     this.syncPlayback.stop();
     this.audioOutput.stop();
     this.blendshapeBuffer.clear();
@@ -823,7 +823,7 @@ export class ChatManager implements Disposable {
   }
 
   private resetPlaybackState(): void {
-    log.info(`[teardown] resetPlaybackState turnId=${this.currentTurnId} wasInterrupted=${this.wasInterrupted}`);
+    log.debug(`[teardown] resetPlaybackState turnId=${this.currentTurnId} wasInterrupted=${this.wasInterrupted}`);
     this.playbackEnded = false;
     this.interruptCutoffMs = null;
     this.currentTurnId = null;

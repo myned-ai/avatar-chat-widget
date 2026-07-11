@@ -337,6 +337,14 @@ export class GaussianAvatar implements Disposable {
   private startTime = 0;
   
   public getChatState(): ChatState {
+    // The renderer's Listening state has no clips of its own — it plays a
+    // clone of the idle clip through a code path with known re-entry bugs
+    // (upstream never exercised it: their demo ran Listening for one second
+    // and their widget never sent a valid Listening state at all). Reporting
+    // Idle instead keeps the primary idle action looping continuously across
+    // listening phases — same visual, none of the clone lifecycle. Widget
+    // behaviors (gaze, blinks, arbiter) still see the real state.
+    if (this.curState === 'Listening') return 'Idle';
     return this.curState;
   }
   
@@ -352,7 +360,7 @@ export class GaussianAvatar implements Disposable {
     if (this.curState !== state) {
       const nowMs = performance.now();
       const dwellMs = Math.round(nowMs - this._stateEnteredAtMs);
-      log.info(
+      log.debug(
         `[state-trace] ${new Date().toISOString()} ${source}: ${this.curState} → ${state}`
         + ` | dwell=${dwellMs}ms | writesSinceLastChange=${JSON.stringify(this._stateWriteCounts)}`
       );
@@ -390,7 +398,7 @@ export class GaussianAvatar implements Disposable {
    */
   public disableLiveBlendshapes(): void {
     this.liveBlendshapeData = null;
-    log.info('[teardown] live blendshapes cleared — face falls back to neutral');
+    log.debug('[teardown] live blendshapes cleared — face falls back to neutral');
   }
   
   /**
@@ -637,7 +645,7 @@ export class GaussianAvatar implements Disposable {
       const targetPitchUnits = Math.min(Math.abs(this.gazeTargetPitchDeg) / SACCADE_ARKIT_DEG_PER_UNIT, 1);
       const yawSide   = this.gazeTargetYawDeg   > 0 ? 'right' : this.gazeTargetYawDeg   < 0 ? 'left'  : 'centre';
       const pitchSide = this.gazeTargetPitchDeg > 0 ? 'up'    : this.gazeTargetPitchDeg < 0 ? 'down'  : 'centre';
-      log.info(
+      log.debug(
         `[gaze] mode=${this.gazeMode} state=${this.curState} ` +
         `target: yaw=${this.gazeTargetYawDeg.toFixed(2)}° (${yawSide}, ${targetYawUnits.toFixed(3)} unit) ` +
         `pitch=${this.gazeTargetPitchDeg.toFixed(2)}° (${pitchSide}, ${targetPitchUnits.toFixed(3)} unit) ` +

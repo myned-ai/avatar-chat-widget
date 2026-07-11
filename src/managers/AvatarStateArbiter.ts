@@ -79,7 +79,7 @@ export class AvatarStateArbiter {
     const cls = classify(source);
 
     if (cls === 'cleanup') {
-      log.info(`[arbiter] DROP (cleanup) ${source}: → ${state}`);
+      log.debug(`[arbiter] DROP (cleanup) ${source}: → ${state}`);
       return;
     }
 
@@ -87,10 +87,10 @@ export class AvatarStateArbiter {
       // Arm (or re-arm) the fallback; it fires only if nothing authoritative
       // lands within FALLBACK_MS.
       this.clearFallback();
-      log.info(`[arbiter] FALLBACK armed ${source}: → ${state} in ${FALLBACK_MS}ms`);
+      log.debug(`[arbiter] FALLBACK armed ${source}: → ${state} in ${FALLBACK_MS}ms`);
       this.fallbackTimer = window.setTimeout(() => {
         this.fallbackTimer = null;
-        log.info(`[arbiter] FALLBACK fired ${source}: → ${state}`);
+        log.debug(`[arbiter] FALLBACK fired ${source}: → ${state}`);
         this.admit({ state, source, cls });
       }, FALLBACK_MS);
       return;
@@ -129,14 +129,14 @@ export class AvatarStateArbiter {
     // Inside the dwell window (or a deferral already queued): keep the
     // highest-precedence, latest request.
     if (this.pending === null || PRECEDENCE[req.cls] >= PRECEDENCE[this.pending.cls]) {
-      log.info(
+      log.debug(
         `[arbiter] DEFER ${req.source}: → ${req.state}`
         + (this.pending ? ` (supersedes ${this.pending.source} → ${this.pending.state})` : '')
         + ` | ${Math.max(0, Math.round(DWELL_MS - sinceLast))}ms left in dwell`
       );
       this.pending = req;
     } else {
-      log.info(`[arbiter] DROP (precedence) ${req.source}: → ${req.state} | pending ${this.pending.source} wins`);
+      log.debug(`[arbiter] DROP (precedence) ${req.source}: → ${req.state} | pending ${this.pending.source} wins`);
     }
 
     if (this.pendingTimer === null) {
@@ -167,7 +167,7 @@ export class AvatarStateArbiter {
     if (this.fallbackTimer !== null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
-      log.info('[arbiter] FALLBACK cancelled');
+      log.debug('[arbiter] FALLBACK cancelled');
     }
   }
 }
