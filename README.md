@@ -6,7 +6,7 @@
 
 > **Next-Gen Engagement:** Replace static chatbots with a living, breathing 3D avatar that talks to your visitors.
 
-## ✨ Features
+## Features
 
 - **Hyper-Realistic 3D Avatars**: Powered by **3D Gaussian Splatting** for cinematic visual fidelity directly in the browser.
 - **Precise Lip-Sync**: Animation tightly synchronized with audio for a lifelike experience.
@@ -75,7 +75,7 @@ chat.destroy();  // Cleanup
 | `primaryColor` | `string` | `'#4B4ACF'` | Main brand color (hex, rgb, etc) |
 | `suggestions` | `string[]` | `['...']` | Array of quick-reply suggestions |
 | `startCollapsed` | `boolean` | `true` | Start minimized as bubble |
-| `tooltipText` | `string` | `'Hi! 👋...'` | Text shown on bubble hover |
+| `tooltipText` | `string` | `'Hi!...'` | Text shown on bubble hover |
 | `width` | `number` | `380` | Widget width (200-2000px) |
 | `height` | `number` | `550` | Widget height (300-2000px) |
 | `enableVoice` | `boolean` | `true` | Enable voice chat |
