@@ -17,8 +17,10 @@ export interface IAvatarController {
   /**
    * Set the current chat state for avatar behavior
    * @param state - Current state: Idle, Listening, Thinking, Responding
+   * @param source - Identifies the calling code path, for state-write
+   *   tracing and arbitration
    */
-  setChatState(state: ChatState): void;
+  setChatState(state: ChatState, source?: string): void;
 
   /**
    * Get the current chat state
@@ -50,6 +52,14 @@ export interface IAvatarController {
    * Resume avatar animation
    */
   resume?(): void;
+
+  /**
+   * Update the avatar with the RMS energy of the most recent audio frame.
+   * Optional — used by avatars with audio-gated procedural gaze (look away
+   * during speech pauses, hold mutual gaze during fluent speech).
+   * @param rms - linear RMS in [0, 1] (PCM16 scaled by 1/32768 then RMS'd)
+   */
+  updateAudioRMS?(rms: number): void;
 }
 
 /**

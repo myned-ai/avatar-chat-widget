@@ -6,7 +6,7 @@
 
 > **Next-Gen Engagement:** Replace static chatbots with a living, breathing 3D avatar that talks to your visitors.
 
-## ✨ Features
+## Features
 
 - **Hyper-Realistic 3D Avatars**: Powered by **3D Gaussian Splatting** for cinematic visual fidelity directly in the browser.
 - **Precise Lip-Sync**: Animation tightly synchronized with audio for a lifelike experience.
@@ -75,13 +75,14 @@ chat.destroy();  // Cleanup
 | `primaryColor` | `string` | `'#4B4ACF'` | Main brand color (hex, rgb, etc) |
 | `suggestions` | `string[]` | `['...']` | Array of quick-reply suggestions |
 | `startCollapsed` | `boolean` | `true` | Start minimized as bubble |
-| `tooltipText` | `string` | `'Hi! 👋...'` | Text shown on bubble hover |
+| `tooltipText` | `string` | `'Hi!...'` | Text shown on bubble hover |
 | `width` | `number` | `380` | Widget width (200-2000px) |
 | `height` | `number` | `550` | Widget height (300-2000px) |
 | `enableVoice` | `boolean` | `true` | Enable voice chat |
 | `enableText` | `boolean` | `true` | Enable text chat |
 | `authEnabled` | `boolean` | `false` | Enable HMAC authentication |
 | `avatarUrl` | `string` | auto-detected | URL to avatar ZIP file |
+| `backgroundImage` | `string` | `undefined` | Image drawn behind the avatar in the 3D stage (URL or path relative to `assetsBaseUrl`) |
 | `assetsBaseUrl` | `string` | auto-detected | Base URL for worklet/assets |
 | `customStyles` | `string` | `undefined` | Custom CSS to inject into Shadow DOM |
 | `logLevel` | `string` | `'error'` | `none`, `error`, `warn`, `info`, `debug` |
@@ -111,6 +112,25 @@ AvatarChat.init({
   secondaryColor: '#37474F'
 });
 ```
+
+### Avatar Stage Background
+
+To show an image behind the avatar instead of the default flat background:
+
+```typescript
+AvatarChat.init({
+  container: '#avatar-chat',
+  serverUrl: 'wss://...',
+  backgroundImage: '/asset/office.png', // absolute URL, or path resolved against assetsBaseUrl
+});
+```
+
+### Mist Overlay
+
+The avatar-focus view has a soft mist fade at the bottom of the stage. It is
+currently disabled by default. To re-enable it, uncomment the two
+`display: block` rules for `.avatar-mist-overlay` in
+[src/widget/styles.ts](src/widget/styles.ts) (desktop and mobile) and rebuild.
 
 ### Advanced Styling
 
@@ -159,6 +179,7 @@ AvatarChat.init({
 - `.input-button` - Send & mic buttons
 - `.message.user .message-bubble` - User message bubbles
 - `#chatInput:focus` - Input field focus state
+- `.avatar-subtitles` - Subtitle pill in avatar view (background, text color, position)
 
 ---
 

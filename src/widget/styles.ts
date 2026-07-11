@@ -300,7 +300,7 @@ const AVATAR_STYLES = `
 }
 
 [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
-  display: block;
+  /* display: block; */ /* SILENCED: mist fade disabled, base rule (display:none) wins */
 }
 
 /* Text-Focus Mode Transformations (Mascot Orb) */
@@ -334,21 +334,21 @@ const AVATAR_STYLES = `
 `;
 
 const OVERLAY_UI_STYLES = `
-/* Subtitles */
+/* Subtitles — self-contained pill, readable on any stage background */
 .avatar-subtitles {
   display: none;
   position: absolute;
-  bottom: 0px;
+  bottom: 20px;
   left: 0; right: 0;
   margin: 0 auto;
   text-align: center;
   font-family: 'Inter', sans-serif;
   font-size: 13px;
   font-weight: 500;
-  color: #374151;
-  background: transparent;
-  padding: 0 16px;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+  color: #F9FAFB;
+  background: rgba(17, 24, 39, 0.55);
+  border-radius: 14px;
+  padding: 5px 14px;
   z-index: 25;
   max-width: 320px;
   width: fit-content;
@@ -375,8 +375,9 @@ const OVERLAY_UI_STYLES = `
   pointer-events: none;
 }
 
-.avatar-subtitles.user-speaking { color: var(--primary-color); }
-.avatar-subtitles .subtitle-current { color: var(--primary-color); font-weight: 600; }
+/* Accent colors lightened toward white so they hold contrast on the dark pill */
+.avatar-subtitles.user-speaking { color: color-mix(in srgb, var(--primary-color) 40%, white); }
+.avatar-subtitles .subtitle-current { color: color-mix(in srgb, var(--primary-color) 40%, white); font-weight: 600; }
 
 /* Suggestions */
 .avatar-suggestions {
@@ -935,7 +936,7 @@ const MOBILE_STYLES = `
   
   /* Suggestions & Mist */
   :host(:not(.collapsed)) [data-drawer-state="avatar-focus"] .avatar-mist-overlay {
-    display: block;
+    /* display: block; */ /* SILENCED: mist fade disabled on mobile too */
     bottom: 0;
     height: 35vh;
   }
@@ -956,7 +957,7 @@ const MOBILE_STYLES = `
     width: auto;
     font-size: 15px;
     white-space: normal;
-    padding: 0 20px;
+    padding: 6px 16px;
   }
 
   /* Keyboard Visible / Input Focus State */

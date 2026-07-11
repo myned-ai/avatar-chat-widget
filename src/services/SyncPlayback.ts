@@ -30,6 +30,7 @@ interface ScheduledFrame {
   startTime: number;  // AudioContext time when this frame starts
   endTime: number;    // AudioContext time when this frame ends
   frameIndex: number;
+  rms: number;        // Precomputed audio RMS of this frame
 }
 
 /**
@@ -72,6 +73,7 @@ export class SyncPlayback implements Disposable {
   // Callbacks
   private onBlendshapeUpdate: ((weights: Record<string, number>) => void) | null = null;
   private onPlaybackEnd: (() => void) | null = null;
+  private onAudioRMS: ((rms: number) => void) | null = null;
 
   // Buffer thresholds
   // Server sends ~30 frames per second in bursts (1 second of audio at a time)
@@ -137,6 +139,14 @@ export class SyncPlayback implements Disposable {
    */
   setPlaybackEndCallback(callback: () => void): void {
     this.onPlaybackEnd = callback;
+  }
+
+  /**
+   * Set callback that fires with the RMS energy (0..1) of every scheduled
+   * audio frame. Used by the avatar to drive pause-aware procedural gaze.
+   */
+  setAudioRMSCallback(callback: (rms: number) => void): void {
+    this.onAudioRMS = callback;
   }
 
   /**
@@ -332,10 +342,19 @@ export class SyncPlayback implements Disposable {
     }
     
     // Convert PCM16 to Float32 for Web Audio (optimized loop)
+    // Compute sum-of-squares inline for the RMS callback (no extra pass).
     const scale = 1.0 / 32768.0;
+    let sumSq = 0;
     for (let i = 0; i < sampleCount; i++) {
-      floatData[i] = pcmData[i] * scale;
+      const s = pcmData[i] * scale;
+      floatData[i] = s;
+      sumSq += s * s;
     }
+    // RMS is stored on the scheduled frame and emitted at PLAYBACK time (see
+    // updateBlendshapeForCurrentTime), not here. Emitting at schedule time
+    // would drive procedural motion ~150 ms ahead of the audio the user
+    // hears, and in bursts tied to frame delivery rather than to playback.
+    const frameRms = sampleCount > 0 ? Math.sqrt(sumSq / sampleCount) : 0;
     
     // Create audio buffer - this allocation is unavoidable (Web Audio API requirement)
     const audioBuffer = this.audioContext.createBuffer(1, sampleCount, this.sampleRate);
@@ -359,6 +378,7 @@ export class SyncPlayback implements Disposable {
       startTime: startTime,
       endTime: startTime + duration,
       frameIndex: frame.frameIndex,
+      rms: frameRms,
     };
 
     // No limit on scheduled frames - they're cleaned up by cleanupScheduledFrames()
@@ -418,16 +438,21 @@ export class SyncPlayback implements Disposable {
       }
     }
 
-    // Apply blendshape weights - simple and correct
+    // Apply blendshape weights - simple and correct. RMS rides the same
+    // playback clock so procedural head motion is synced to the audio the
+    // user actually hears; between frames (a genuine gap in the playing
+    // audio) the emitted RMS is 0.
     if (activeFrame) {
       this.currentWeights = activeFrame.weights;
       this.onBlendshapeUpdate(activeFrame.weights);
+      this.onAudioRMS?.(activeFrame.rms);
     } else if (this.isPlaying && this.scheduledFrames.length > 0) {
       // If we're between frames or slightly ahead, use the most recent frame
       const lastFrame = this.scheduledFrames[this.scheduledFrames.length - 1];
       if (currentTime < lastFrame.endTime + 0.1) {
         this.onBlendshapeUpdate(lastFrame.weights);
       }
+      this.onAudioRMS?.(0);
     }
   }
 

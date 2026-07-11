@@ -51,6 +51,9 @@ export interface AvatarChatConfig {
   /** Secondary color for header text, toolbar icons, widget icon (default: #1F2937) */
   secondaryColor?: string;
 
+  /** Background image URL for the avatar stage (default: none — uses gradient) */
+  backgroundImage?: string;
+
   /** Quick reply suggestions shown below chat (default: built-in suggestions) */
   suggestions?: string[];
 

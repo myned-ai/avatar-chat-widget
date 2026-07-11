@@ -16,7 +16,11 @@ const log = logger.scope('LazyAvatar');
 /**
  * Type for GaussianAvatar constructor (ensures type safety on dynamic import)
  */
-type GaussianAvatarConstructor = new (container: HTMLDivElement, assetsPath: string) => IAvatarController & {
+type GaussianAvatarConstructor = new (
+  container: HTMLDivElement,
+  assetsPath: string,
+  backgroundImage?: string,
+) => IAvatarController & {
   start?: () => Promise<void> | void;
 };
 
@@ -29,6 +33,8 @@ export interface LazyAvatarOptions {
   onError?: (error: Error) => void;
   /** Show loading indicator */
   onLoadingStart?: () => void;
+  /** Background image URL drawn behind the avatar inside the 3D scene */
+  backgroundImage?: string;
 }
 
 /**
@@ -195,7 +201,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._removePlaceholder();
       
       // Create the actual avatar (now properly typed)
-      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath);
+      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath, this._options.backgroundImage);
       
       // Start rendering if the avatar has a start method
       if (this._avatar.start) {
@@ -204,7 +210,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
       
       // Apply any pending state
       if (this._pendingState !== 'Idle') {
-        this._avatar.setChatState(this._pendingState);
+        this._avatar.setChatState(this._pendingState, 'lazy-pending-apply');
       }
       
       if (this._liveBlendshapesEnabled) {
@@ -257,11 +263,15 @@ export class LazyAvatar implements IAvatarController, Disposable {
     }
   }
   
-  public setChatState(state: ChatState): void {
+  public setChatState(state: ChatState, source?: string): void {
     this._pendingState = state;
     if (this._avatar) {
-      this._avatar.setChatState(state);
+      this._avatar.setChatState(state, source);
     }
+  }
+
+  public updateAudioRMS(rms: number): void {
+    this._avatar?.updateAudioRMS?.(rms);
   }
 
   public getChatState(): ChatState {
