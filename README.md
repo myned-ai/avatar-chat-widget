@@ -298,17 +298,21 @@ Server runs on `ws://localhost:8765` by default.
 
 ## Acknowledgements
 
-Built on amazing open-source research:
-- [OpenLRM](https://github.com/3DTopia/OpenLRM)
-- [GAGAvatar](https://github.com/xg-chu/GAGAvatar)
-- [GaussianAvatars](https://github.com/ShenhanQian/GaussianAvatars)
-- [VHAP](https://github.com/ShenhanQian/VHAP)
-- [LAM](https://github.com/aigc3d/LAM)
-
-Thanks for their excellent works and great contribution.
+Inspired by excellent research in the avatar space:
+[OpenLRM](https://github.com/3DTopia/OpenLRM),
+[GAGAvatar](https://github.com/xg-chu/GAGAvatar),
+[GaussianAvatars](https://github.com/ShenhanQian/GaussianAvatars),
+[VHAP](https://github.com/ShenhanQian/VHAP).
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Code: MIT — see [LICENSE](LICENSE).
+
+The bundled demo avatar (`public/asset/nyx.zip`) was created with
+[LAM](https://github.com/aigc3d/LAM), whose code is Apache-2.0 but whose
+model weights and assets are
+[CC BY-NC 4.0](https://github.com/aigc3d/LAM/blob/master/LICENSE_WEIGHT)
+(© aigc3d). The demo asset is therefore for non-commercial use;
+commercial deployments should provide their own avatar via `avatarUrl`.
