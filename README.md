@@ -312,8 +312,9 @@ Code: MIT — see [LICENSE](LICENSE).
 
 The bundled demo avatar (`public/asset/nyx.zip`) is adapted from
 [LAM](https://github.com/aigc3d/LAM) output (with our own skeleton
-re-weighting and animation set). LAM's code is Apache-2.0, but its model
-weights and assets are
-[CC BY-NC 4.0](https://github.com/aigc3d/LAM/blob/master/LICENSE_WEIGHT)
-(© aigc3d), so the demo asset is for non-commercial use; commercial
-deployments should provide their own avatar via `avatarUrl`.
+re-weighting and animation set). LAM's code is Apache-2.0; its sample
+assets, including the animation data used here, are distributed under
+MIT via [LAM_WebRender](https://github.com/aigc3d/LAM_WebRender). LAM's
+model weights are [CC BY-NC 4.0](https://github.com/aigc3d/LAM/blob/master/LICENSE_WEIGHT)
+but are not part of this package and place no conditions on generated
+output.
