@@ -50,7 +50,7 @@ const SACCADE_BY_STATE: Record<ChatState, {
   'Idle': {
     mutualMean: 2500, mutualSigma: 600, returnProb: 0.70,
     awayMean:    220, awaySigma:    80,
-    magnitudeMaxDeg: 8,
+    magnitudeMaxDeg: 5,
   },
   // User speaking → listener-focused gaze.
   // Lee & Badler "Eyes Alive" SIGGRAPH 2002: listeners hold mutual gaze ~75% of
@@ -58,12 +58,12 @@ const SACCADE_BY_STATE: Record<ChatState, {
   // focused party in dyadic conversation.
   // Solved for mutualMean/(mutualMean + awayMean/returnProb) ≈ 0.76:
   //   1300/(1300 + 200/0.5) = 0.76 ✓
-  // Smaller magnitude (8°) keeps the focused look stable; faster mean away with
+  // Smaller magnitude (5°) keeps the focused look stable; faster mean away with
   // higher returnProb biases the wanderings back to mutual gaze.
   'Listening': {
     mutualMean: 1300, mutualSigma: 250, returnProb: 0.50,
     awayMean:   200, awaySigma:    60,
-    magnitudeMaxDeg: 8,
+    magnitudeMaxDeg: 5,
   },
   // Talking → counter-intuitively LESS focused on listener.
   // Verified from Lee & Badler "Eyes Alive" (SIGGRAPH 2002) via SmartBody source
@@ -73,7 +73,7 @@ const SACCADE_BY_STATE: Record<ChatState, {
   'Responding': {
     mutualMean: 1400, mutualSigma: 300, returnProb: 0.41,
     awayMean:    278, awaySigma:    49,
-    magnitudeMaxDeg: 10,
+    magnitudeMaxDeg: 6,
   },
 };
 
@@ -96,6 +96,12 @@ const EYE_DEG_PER_UNIT = { out: 21.4, in: 9.6, up: 14.2, down: 11.9 };
 // sub-degree (classical bound ~0.25°; Collewijn & Kowler 2008) — larger
 // values read as deliberate re-fixations and make steady gaze look flicky.
 const SACCADE_MICROSACCADE_DEG  = 0.25;
+// Away-glance direction shaping: the vertical component of an aversion is
+// compressed relative to the horizontal, and its upward range is clamped —
+// people avert sideways and down in conversation; upward aversions read as
+// eye-rolling on a rendered face.
+const GAZE_AWAY_PITCH_SCALE = 0.4;
+const GAZE_AWAY_PITCH_UP_MAX_DEG = 1.0;
 
 // Gaze realization is renderer-side: the renderer solves a camera look-at
 // against the head bone's true world pose (baked clip + procedural delta)
@@ -614,11 +620,17 @@ export class GaussianAvatar implements Disposable {
         this.gazeTargetYawDeg = (Math.random() - 0.5) * 2 * j;
         this.gazeTargetPitchDeg = (Math.random() - 0.5) * 2 * j;
       } else {
-        // Sweep to a random off-camera target within ±cfg.magnitudeMaxDeg
+        // Sweep to a random off-camera target within ±cfg.magnitudeMaxDeg.
+        // Conversational aversions are predominantly lateral and downward;
+        // an upward glance reads as an eye-roll, so the vertical component
+        // is compressed and its upward range clamped near zero.
         const r = Math.sqrt(Math.random()) * cfg.magnitudeMaxDeg;
         const theta = Math.random() * 2 * Math.PI;
         this.gazeTargetYawDeg = r * Math.cos(theta);
-        this.gazeTargetPitchDeg = r * Math.sin(theta);
+        this.gazeTargetPitchDeg = Math.min(
+          GAZE_AWAY_PITCH_UP_MAX_DEG,
+          r * Math.sin(theta) * GAZE_AWAY_PITCH_SCALE,
+        );
       }
 
       this.gazeTransitionStartMs = now;
