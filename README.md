@@ -179,6 +179,7 @@ AvatarChat.init({
 - `.input-button` - Send & mic buttons
 - `.message.user .message-bubble` - User message bubbles
 - `#chatInput:focus` - Input field focus state
+- `.avatar-subtitles` - Subtitle pill in avatar view (background, text color, position)
 
 ---
 
