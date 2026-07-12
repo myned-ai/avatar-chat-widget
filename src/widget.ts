@@ -25,6 +25,7 @@
 
 import { setConfig, type AppConfig } from './config';
 import { LazyAvatar } from './avatar/LazyAvatar';
+import type { IAvatarController } from './types/avatar';
 import { ChatManager } from './managers/ChatManager';
 import { AudioContextManager } from './services/AudioContextManager';
 import { logger, LogLevel } from './utils/Logger';
@@ -49,6 +50,8 @@ const log = logger.scope('Widget');
 // Re-export types from widget/types.ts
 // ============================================================================
 export type { AvatarChatConfig, AvatarChatInstance } from './widget/types';
+export type { IAvatarController } from './types/avatar';
+export type { ChatState } from './types/common';
 
 // ============================================================================
 // Default Configuration
@@ -979,6 +982,94 @@ if (typeof customElements !== 'undefined' && !customElements.get('avatar-chat-wi
 }
 
 // ============================================================================
+// Renderer-only mount (no ChatManager, no networking)
+// ============================================================================
+
+/** Options for {@link mountAvatar}. */
+export interface MountAvatarOptions {
+  /** DOM element or CSS selector to render the avatar into */
+  container: string | HTMLElement;
+  /** URL of the avatar asset (.zip). Defaults to the bundled Nyx avatar. */
+  avatarUrl?: string;
+  /** Optional background image drawn behind the avatar inside the 3D scene */
+  backgroundImage?: string;
+  /** Called once the heavy renderer has loaded and is rendering */
+  onReady?: () => void;
+  /** Called if the renderer fails to load (a fallback UI is shown) */
+  onError?: (error: Error) => void;
+}
+
+/** Controller returned by {@link mountAvatar}: the full avatar control
+ *  surface plus load-state introspection. */
+export interface MountedAvatar extends IAvatarController {
+  /** True once the heavy renderer has loaded */
+  readonly isLoaded: boolean;
+  /** True while the heavy renderer is loading */
+  readonly isLoading: boolean;
+}
+
+/**
+ * Mount the 3D avatar renderer standalone and drive it yourself.
+ *
+ * Unlike {@link AvatarChat.init}, this starts NO voice loop, NO WebSocket and
+ * NO chat UI — it returns the avatar controller so the host app feeds it
+ * state, blendshape weights and audio RMS from its own pipeline:
+ *
+ * ```ts
+ * const avatar = AvatarChat.mountAvatar({ container: '#stage' });
+ * avatar.setChatState('Listening');
+ * avatar.enableLiveBlendshapes();
+ * avatar.updateBlendshapes({ jawOpen: 0.4, ... }); // 52 ARKit weights, 30 FPS
+ * avatar.updateAudioRMS?.(0.12);                   // gaze behaviour
+ * avatar.dispose();                                // unmount
+ * ```
+ *
+ * Multiple mounts are allowed (no singleton). Loading is lazy: a lightweight
+ * placeholder shows immediately and the renderer chunk loads in the background.
+ */
+export function mountAvatar(options: MountAvatarOptions): MountedAvatar {
+  if (!options || !options.container) {
+    throw new Error('AvatarChat.mountAvatar(): container is required');
+  }
+
+  const containerEl = typeof options.container === 'string'
+    ? document.querySelector(options.container)
+    : options.container;
+
+  if (!containerEl) {
+    throw new Error(`AvatarChat.mountAvatar(): container not found: ${options.container}`);
+  }
+
+  if (options.avatarUrl !== undefined) {
+    if (typeof options.avatarUrl !== 'string') {
+      throw new Error('AvatarChat.mountAvatar(): avatarUrl must be a string');
+    }
+    if (!options.avatarUrl.endsWith('.zip')) {
+      throw new Error('AvatarChat.mountAvatar(): avatarUrl must be a .zip file');
+    }
+    if (options.avatarUrl.includes('..')) {
+      throw new Error('AvatarChat.mountAvatar(): avatarUrl cannot contain path traversal');
+    }
+  }
+
+  if (options.backgroundImage !== undefined && options.backgroundImage.includes('..')) {
+    throw new Error('AvatarChat.mountAvatar(): backgroundImage cannot contain path traversal');
+  }
+
+  const avatarUrl = options.avatarUrl || AvatarChat.getDefaultAvatarUrl();
+
+  const avatar = new LazyAvatar(containerEl as HTMLDivElement, avatarUrl, {
+    preload: true,
+    backgroundImage: options.backgroundImage,
+    onReady: options.onReady,
+    onError: options.onError,
+  });
+  avatar.start();
+
+  return avatar;
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -1198,6 +1289,14 @@ export const AvatarChat = {
       reconnect: () => widget.reconnect(),
       triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
     };
+  },
+
+  /**
+   * Mount the 3D avatar renderer standalone — no voice loop, no WebSocket,
+   * no chat UI. Returns the avatar controller; see {@link mountAvatar}.
+   */
+  mountAvatar(options: MountAvatarOptions): MountedAvatar {
+    return mountAvatar(options);
   },
 
   /**
