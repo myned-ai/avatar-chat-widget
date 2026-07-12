@@ -20,8 +20,10 @@ type GaussianAvatarConstructor = new (
   container: HTMLDivElement,
   assetsPath: string,
   backgroundImage?: string,
+  backgroundColor?: string,
 ) => IAvatarController & {
   start?: () => Promise<void> | void;
+  setBackgroundColor?: (color: string) => void;
 };
 
 export interface LazyAvatarOptions {
@@ -35,6 +37,8 @@ export interface LazyAvatarOptions {
   onLoadingStart?: () => void;
   /** Background image URL drawn behind the avatar inside the 3D scene */
   backgroundImage?: string;
+  /** Initial scene background color, hex like "#22d3ee" (default white) */
+  backgroundColor?: string;
 }
 
 /**
@@ -43,6 +47,7 @@ export interface LazyAvatarOptions {
  */
 type AvatarControllerWithStart = IAvatarController & {
   start?: () => Promise<void> | void;
+  setBackgroundColor?: (color: string) => void;
 };
 
 export class LazyAvatar implements IAvatarController, Disposable {
@@ -58,6 +63,7 @@ export class LazyAvatar implements IAvatarController, Disposable {
   // Queue state changes until avatar loads
   private _pendingState: ChatState = 'Idle';
   private _pendingBlendshapes: Record<string, number> | null = null;
+  private _pendingBackgroundColor: string | null = null;
   private _liveBlendshapesEnabled = false;
   private _loadFailed = false;
   
@@ -201,7 +207,12 @@ export class LazyAvatar implements IAvatarController, Disposable {
       this._removePlaceholder();
       
       // Create the actual avatar (now properly typed)
-      this._avatar = new GaussianAvatarClass(this._container, this._assetsPath, this._options.backgroundImage);
+      this._avatar = new GaussianAvatarClass(
+        this._container,
+        this._assetsPath,
+        this._options.backgroundImage,
+        this._options.backgroundColor,
+      );
       
       // Start rendering if the avatar has a start method
       if (this._avatar.start) {
@@ -219,6 +230,11 @@ export class LazyAvatar implements IAvatarController, Disposable {
       
       if (this._pendingBlendshapes) {
         this._avatar.updateBlendshapes(this._pendingBlendshapes);
+      }
+
+      if (this._pendingBackgroundColor) {
+        this._avatar.setBackgroundColor?.(this._pendingBackgroundColor);
+        this._pendingBackgroundColor = null;
       }
       
       this._isLoaded = true;
@@ -272,6 +288,16 @@ export class LazyAvatar implements IAvatarController, Disposable {
 
   public updateAudioRMS(rms: number): void {
     this._avatar?.updateAudioRMS?.(rms);
+  }
+
+  /** Change the scene background color at runtime (queued until the renderer
+   *  loads). Hex like "#22d3ee". */
+  public setBackgroundColor(color: string): void {
+    if (this._avatar) {
+      this._avatar.setBackgroundColor?.(color);
+    } else {
+      this._pendingBackgroundColor = color;
+    }
   }
 
   public getChatState(): ChatState {

@@ -993,6 +993,9 @@ export interface MountAvatarOptions {
   avatarUrl?: string;
   /** Optional background image drawn behind the avatar inside the 3D scene */
   backgroundImage?: string;
+  /** Initial scene background color, hex like "#22d3ee" (default white).
+   *  Change it later with {@link MountedAvatar.setBackgroundColor}. */
+  backgroundColor?: string;
   /**
    * Internal render resolution in px (default 800). The renderer sizes its
    * canvas from its container, so mountAvatar renders into a renderSize×
@@ -1014,6 +1017,9 @@ export interface MountedAvatar extends IAvatarController {
   readonly isLoaded: boolean;
   /** True while the heavy renderer is loading */
   readonly isLoading: boolean;
+  /** Change the 3D scene background color at runtime (e.g. to follow
+   *  conversation state). Hex like "#22d3ee"; queued until the renderer loads. */
+  setBackgroundColor(color: string): void;
 }
 
 /**
@@ -1103,6 +1109,7 @@ export function mountAvatar(options: MountAvatarOptions): MountedAvatar {
   const avatar = new LazyAvatar(renderLayer as HTMLDivElement, avatarUrl, {
     preload: true,
     backgroundImage: options.backgroundImage,
+    backgroundColor: options.backgroundColor,
     onReady: options.onReady,
     onError: options.onError,
   });

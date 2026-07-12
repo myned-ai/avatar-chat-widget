@@ -1,5 +1,5 @@
 import * as GaussianSplats3D from "@myned-ai/gsplat-flame-avatar-renderer"
-import { TextureLoader, SRGBColorSpace, Object3D, type Scene } from 'three';
+import { TextureLoader, SRGBColorSpace, Object3D, Color, type Scene } from 'three';
 import { createNeutralWeights } from '../constants/arkit';
 import { logger } from '../utils/Logger';
 import { EnergyEnvelope, ENERGY_FEED_STALE_SEC } from './EnergyEnvelope';
@@ -180,6 +180,7 @@ export class GaussianAvatar implements Disposable {
   private _avatarDivEle: HTMLDivElement;
   private _assetsPath = "";
   private _backgroundImage?: string;
+  private _backgroundColor = "0xffffff";
   public curState: ChatState = "Idle";
   private _renderer!: GaussianSplats3D.GaussianSplatRenderer;
   private forceEyesClosed = false;
@@ -223,13 +224,22 @@ export class GaussianAvatar implements Disposable {
   // Behavioral gaze offset from the camera axis (degrees); see getGazeOffset.
   private readonly _gazeOffset = { yawDeg: 0, pitchDeg: 0 };
   
-  constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string) {
+  constructor(container: HTMLDivElement, assetsPath: string, backgroundImage?: string, backgroundColor?: string) {
     this._avatarDivEle = container;
     this._assetsPath = assetsPath;
     this._backgroundImage = backgroundImage;
+    this._backgroundColor = GaussianAvatar._normalizeHexColor(backgroundColor) ?? "0xffffff";
     // Initialize neutral blendshapes using centralized constants
     this.neutralBlendshapes = createNeutralWeights();
     this._init();
+  }
+
+  /** Accepts "#22d3ee", "22d3ee" or "0x22d3ee"; returns the renderer's
+   *  strict "0x......" form, or undefined if it isn't a 6-digit hex color. */
+  private static _normalizeHexColor(color?: string): string | undefined {
+    if (!color) return undefined;
+    const hex = color.trim().replace(/^#|^0x/i, '');
+    return /^[0-9a-f]{6}$/i.test(hex) ? `0x${hex.toLowerCase()}` : undefined;
   }
   
   private _init() {
@@ -269,7 +279,7 @@ export class GaussianAvatar implements Disposable {
         // Supported by the current renderer build; not yet in the published
         // package's type declarations, hence the cast below.
         getGazeOffset: this.getGazeOffset.bind(this),
-        backgroundColor: "0xffffff"
+        backgroundColor: this._backgroundColor
       } as unknown as Parameters<typeof GaussianSplats3D.GaussianSplatRenderer.getInstance>[2],
     );
 
@@ -281,6 +291,44 @@ export class GaussianAvatar implements Disposable {
     // Initial state is 'Idle' - ChatManager will set appropriate states based on conversation
     // State flow: Idle → Hello (user interaction) → Responding (AI speaks) → Idle
     log.info('Avatar ready, initial state:', this.curState);
+  }
+
+  /**
+   * Change the scene background color at runtime (e.g. to follow conversation
+   * state). Uses the same `threeScene.background` path as background images,
+   * which paints over the renderer's startup clear color every frame.
+   * Accepts "#22d3ee", "22d3ee" or "0x22d3ee"; invalid values are ignored.
+   */
+  public setBackgroundColor(color: string): void {
+    const normalized = GaussianAvatar._normalizeHexColor(color);
+    if (!normalized) {
+      log.warn('setBackgroundColor: invalid hex color, ignoring', { color });
+      return;
+    }
+    this._backgroundColor = normalized;
+    try {
+      const viewer = this._renderer?.viewer as unknown as { threeScene?: Scene; forceRenderNextFrame?: () => void } | undefined;
+      const scene = viewer?.threeScene;
+      if (!scene) {
+        log.warn('setBackgroundColor: viewer.threeScene not available');
+        return;
+      }
+      this._ensureSceneRenderPath(scene);
+      scene.background = new Color(parseInt(normalized, 16));
+      viewer?.forceRenderNextFrame?.();
+    } catch (err) {
+      log.warn('setBackgroundColor failed', err);
+    }
+  }
+
+  /** Force hasRenderables() to return true so the renderer takes the
+   *  scene-render path — that's what actually paints scene.background. */
+  private _ensureSceneRenderPath(scene: Scene): void {
+    if (!scene.children.some((c) => c.userData?.__bgAnchor)) {
+      const anchor = new Object3D();
+      anchor.userData.__bgAnchor = true;
+      scene.add(anchor);
+    }
   }
 
   /**
@@ -301,12 +349,7 @@ export class GaussianAvatar implements Disposable {
         return;
       }
 
-      // Force hasRenderables() to return true so the renderer takes the scene-render path
-      if (!scene.children.some((c) => c.userData?.__bgAnchor)) {
-        const anchor = new Object3D();
-        anchor.userData.__bgAnchor = true;
-        scene.add(anchor);
-      }
+      this._ensureSceneRenderPath(scene);
 
       new TextureLoader().load(
         url,
