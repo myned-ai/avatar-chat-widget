@@ -63,6 +63,38 @@ chat.expand();   // Open full widget
 chat.destroy();  // Cleanup
 ```
 
+### Renderer-Only Mount
+
+Need just the 3D avatar, driven by your own pipeline — no chat UI, no voice
+loop, no WebSocket? `mountAvatar` returns the avatar controller directly:
+
+```typescript
+import { mountAvatar } from '@myned-ai/avatar-chat-widget';
+// or from a script tag: AvatarChat.mountAvatar(...)
+
+const avatar = mountAvatar({ container: '#stage' });
+
+avatar.setChatState('Listening');          // Idle | Listening | Responding
+avatar.enableLiveBlendshapes();
+avatar.updateBlendshapes({ jawOpen: 0.4 }); // 52 ARKit weights, ~30 FPS
+avatar.updateAudioRMS?.(0.12);              // audio-gated gaze (optional)
+avatar.setBackgroundColor('#22d3ee');       // 3D scene backdrop, runtime
+avatar.dispose();                           // unmount
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `container` | `string \| HTMLElement` | **required** | CSS selector or DOM element |
+| `avatarUrl` | `string` | bundled Nyx | URL to avatar ZIP file |
+| `backgroundColor` | `string` | `'#ffffff'` | Initial 3D scene background (hex) |
+| `backgroundImage` | `string` | `undefined` | Image drawn behind the avatar in the 3D scene |
+| `renderSize` | `number` | `800` | Internal render resolution, px — CSS-scaled to fit the container |
+| `onReady` / `onError` | functions | `undefined` | Renderer loaded / failed to load |
+
+Loading is lazy (placeholder first, renderer chunk in the background), and
+multiple mounts are allowed. The returned controller implements
+`IAvatarController` (exported, with `ChatState`).
+
 ---
 
 ## Configuration
