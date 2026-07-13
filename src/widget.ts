@@ -25,6 +25,8 @@
 
 import { setConfig, type AppConfig } from './config';
 import { LazyAvatar } from './avatar/LazyAvatar';
+import { mountAvatar, type MountAvatarOptions, type MountedAvatar } from './avatar/mount-avatar';
+import { getDefaultAvatarUrl as defaultAvatarUrl } from './avatar/default-asset';
 import { ChatManager } from './managers/ChatManager';
 import { AudioContextManager } from './services/AudioContextManager';
 import { logger, LogLevel } from './utils/Logger';
@@ -49,6 +51,10 @@ const log = logger.scope('Widget');
 // Re-export types from widget/types.ts
 // ============================================================================
 export type { AvatarChatConfig, AvatarChatInstance } from './widget/types';
+export type { IAvatarController } from './types/avatar';
+export type { ChatState } from './types/common';
+export { mountAvatar } from './avatar/mount-avatar';
+export type { MountAvatarOptions, MountedAvatar } from './avatar/mount-avatar';
 
 // ============================================================================
 // Default Configuration
@@ -997,21 +1003,7 @@ export const AvatarChat = {
    * Auto-detects CDN usage and returns the appropriate URL
    */
   getDefaultAvatarUrl(): string {
-    // Check if loaded from CDN by scanning script tags
-    const scripts = document.getElementsByTagName('script');
-    for (let i = 0; i < scripts.length; i++) {
-      const src = scripts[i].src;
-      if (src.includes('jsdelivr.net') && src.includes('avatar-chat-widget')) {
-        const baseUrl = src.substring(0, src.lastIndexOf('/'));
-        return `${baseUrl}/avatar-chat-widget/public/asset/nyx.zip`;
-      }
-      if (src.includes('unpkg.com') && src.includes('avatar-chat-widget')) {
-        const baseUrl = src.substring(0, src.lastIndexOf('/'));
-        return `${baseUrl}/avatar-chat-widget/public/asset/nyx.zip`;
-      }
-    }
-    // Fallback for npm usage or local development
-    return '/asset/nyx.zip';
+    return defaultAvatarUrl();
   },
 
   /**
@@ -1198,6 +1190,14 @@ export const AvatarChat = {
       reconnect: () => widget.reconnect(),
       triggerAction: (name: string, args?: Record<string, any>) => widget.triggerAction(name, args),
     };
+  },
+
+  /**
+   * Mount the 3D avatar renderer standalone — no voice loop, no WebSocket,
+   * no chat UI. Returns the avatar controller; see {@link mountAvatar}.
+   */
+  mountAvatar(options: MountAvatarOptions): MountedAvatar {
+    return mountAvatar(options);
   },
 
   /**
